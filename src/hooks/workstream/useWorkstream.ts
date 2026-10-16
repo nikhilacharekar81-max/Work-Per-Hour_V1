@@ -50,7 +50,8 @@ export function useWorkstream(props?: any) {
     ...props,
     onReconnect,
     hasOrder: (id: string) => (ordersRef.current || []).some((o: any) => o.id === id),
-    onUnknownOrder: props?.refresh
+    onUnknownOrder: props?.refresh,
+    onOrderStateChanged: props?.refresh
   });
   const actions = useWorkstreamActions(props);
 

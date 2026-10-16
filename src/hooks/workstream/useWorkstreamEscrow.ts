@@ -67,7 +67,7 @@ export function useWorkstreamEscrow({
           senderId: 'system',
           senderName: 'WorkSphere Escrow Vault',
           text: `🎉 Escrow funds ($${selectedOrder.amount.toLocaleString()}) released to seller! Workstream marked as completed. Deliverables accepted.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timestamp: new Date().toISOString(),
           type: 'system',
           metadata: {
             action: 'escrow_released',

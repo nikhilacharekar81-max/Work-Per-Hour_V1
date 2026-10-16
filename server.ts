@@ -460,7 +460,8 @@ function sanitizeAndCreateMessage(
   body: any,
   fileCheck: { ok: boolean; fileInfo?: any; error?: string }
 ): Message {
-  const text = typeof body.text === 'string' ? escapeHtml(body.text.trim()) : '';
+  // Stored as typed; React escapes on render, so escaping here would double-escape (&lt; shown literally).
+  const text = typeof body.text === 'string' ? body.text.trim() : '';
   const isSystemOrStaff = isStaffUser(sender);
   
   let type = body.type;
@@ -1312,7 +1313,7 @@ let userEmails: UserEmail[] = [];
 
 function notifyUserOnAdminAction(user: User, action: 'suspended' | 'restricted' | 'deactivated' | 'impersonated', notes?: string) {
   const timestamp = new Date().toLocaleString();
-  const timeShort = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const timeShort = new Date().toISOString();
 
   let emailSubject = '';
   let emailBody = '';
@@ -2087,7 +2088,7 @@ function pushSystemMessage(orderId: string, text: string) {
     senderId: 'system',
     senderName: 'WorkSphere Escrow Vault',
     text,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    timestamp: new Date().toISOString()
   } as Message);
 }
 
@@ -2388,7 +2389,7 @@ app.patch('/api/orders/:id/extend-time', requireAdmin, (req, res) => {
     senderId: 'system',
     senderName: 'System / Admin Notice',
     text: `⏱️ Deadline extended from ${oldDate} to ${order.dueDate}. ${reason ? 'Reason: ' + reason : 'Admin approved time extension.'}`,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    timestamp: new Date().toISOString()
   };
   recordMessage(sysMsg);
 
@@ -2512,7 +2513,7 @@ app.post('/api/orders/:id/deliverable', requireAuth, (req, res) => {
       senderId: 'system',
       senderName: 'WorkSphere Deliveries',
       text: `📦 Deliverable (v${version}) submitted: ${fileSummary}${sanitizedNotes ? ` — "${sanitizedNotes}"` : ''}. Buyer review window initiated.`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: new Date().toISOString(),
       type: 'system',
       metadata: {
         action: 'deliverable_submitted',
@@ -2580,7 +2581,7 @@ app.post('/api/orders/:id/revision', requireAuth, (req, res) => {
     senderId: 'system',
     senderName: 'WorkSphere Revision Desk',
     text: `🔄 Revision requested on delivery v${revisionEntry.deliveryVersion}: "${reason}"`,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    timestamp: new Date().toISOString(),
     type: 'system',
     metadata: {
       action: 'revision_requested',
@@ -2641,7 +2642,7 @@ app.post('/api/orders/:id/dispute', requireAuth, (req, res) => {
       senderId: 'system',
       senderName: 'WorkSphere Dispute Resolution Desk',
       text: `🚨 Dispute opened by ${newDispute.raisedBy}: "${reason}". Order placed under review.`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: new Date().toISOString(),
       type: 'system',
       metadata: {
         action: 'dispute_opened',
@@ -2676,7 +2677,7 @@ app.patch('/api/orders/:id/mute', requireRole(['admin', 'super_admin', 'support'
     text: order.isMuted 
       ? `🔒 Chat paused by Administrator during case review. Neither party may send messages.`
       : `🔓 Chat unlocked by Administrator. Standard messaging resumed.`,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    timestamp: new Date().toISOString()
   };
   recordMessage(sysMsg);
 
@@ -2697,7 +2698,7 @@ app.patch('/api/orders/:id/pause-timer', requireRole(['admin', 'super_admin', 's
     text: order.isTimerPaused 
       ? `⏸️ Delivery countdown paused by Administrator pending dispute/clarification.`
       : `▶️ Delivery countdown resumed by Administrator. Normal timer active.`,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    timestamp: new Date().toISOString()
   };
   recordMessage(sysMsg);
 
@@ -3218,7 +3219,7 @@ app.post('/api/payments/escrow/release', requireAuth, (req, res) => {
       senderId: 'system',
       senderName: 'WorkSphere Escrow Vault',
       text: `🎉 Escrow funds ($${order.amount.toLocaleString()}) released to seller! Workstream marked as completed.`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      timestamp: new Date().toISOString(),
       type: 'system',
       metadata: {
         action: 'escrow_released',
@@ -4346,7 +4347,7 @@ app.post('/api/reviews', requireAuth, (req, res) => {
     senderId: 'system',
     senderName: 'WorkSphere Reviews',
     text: `⭐ ${order.status === 'cancelled' ? 'Post-cancellation review' : 'Review'} submitted by ${caller.name} (${newReview.rating}/5 stars): "${newReview.comment}"`,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    timestamp: new Date().toISOString(),
     type: 'system',
     metadata: {
       action: 'review_submitted',
@@ -4460,7 +4461,7 @@ app.post('/api/reviews/:id/reply', requireAuth, (req, res) => {
         senderId: 'system',
         senderName: 'WorkSphere Reviews',
         text: `💬 Public response posted by seller ${caller.name}: "${replyObj.text}"`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: new Date().toISOString(),
         type: 'system',
         metadata: { action: 'review_reply_submitted', reply: replyObj }
       };
@@ -4519,7 +4520,7 @@ app.post('/api/support-tickets', requireAuth, (req, res) => {
     status: 'open',
     createdAt: new Date().toISOString().split('T')[0],
     messages: [
-      { sender: userName, text: text || 'I need support assistance regarding my account.', timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+      { sender: userName, text: text || 'I need support assistance regarding my account.', timestamp: new Date().toISOString() }
     ]
   };
   supportTickets.unshift(newTicket);
@@ -4775,7 +4776,7 @@ export function processAutoAcceptOrders(customNow?: number): Array<{
         senderId: 'system',
         senderName: 'WorkSphere Review Desk',
         text: `🎉 Order #${order.id} automatically accepted: Buyer review window (${days} days) closed without revisions or dispute. Escrow funds released to seller.`,
-        timestamp: new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        timestamp: new Date(now).toISOString(),
         type: 'system',
         metadata: {
           action: 'order_auto_accepted',
@@ -5682,6 +5683,9 @@ app.post('/api/offers/:id/:action(accept|decline|cancel)', requireAuth, rateLimi
       recordOrder(newOrder);
       offer.status = 'paid';
       offer.fundedOrderId = childId;
+      // A message on the new order reaches both parties over the socket, so the seller's client learns about it
+      // (unknown order -> order list refresh) instead of only seeing it after a reload.
+      postOfferMessage(newOrder, offer, null, `${offer.number} was paid. Escrow of ${offer.amount} is funded for this workstream.`, 'offer_accepted');
     } else {
       if (orderHasEscrow(order.id) || order.status !== 'in_progress') {
         return res.status(409).json({ error: 'Escrow is already funded for this workstream.' });
@@ -5987,7 +5991,7 @@ app.post('/api/admin/tickets/:id/reply', (req, res) => {
   t.messages.push({
     sender: 'WorkPerHour Support Staff',
     text: req.body.text,
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    timestamp: new Date().toISOString()
   });
   t.status = 'in_progress';
   res.json(t);

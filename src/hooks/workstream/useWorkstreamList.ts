@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { compareMessageTime } from '../../utils/messageTime';
 import { Order, UserAccount, Gig, Message } from '../../types';
 import { WorkstreamItem } from '../../components/workstream/types';
 
@@ -37,7 +38,7 @@ export function useWorkstreamList({
       
       const orderMsgs = messages.filter(m => m.orderId === o.id);
       // 21: Sort by timestamp to ensure we pick the chronologically latest message
-      const sortedMsgs = [...orderMsgs].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      const sortedMsgs = [...orderMsgs].sort(compareMessageTime);
       const lastMsg = sortedMsgs.length > 0 ? sortedMsgs[sortedMsgs.length - 1] : undefined;
 
       return {

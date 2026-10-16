@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { formatMessageTime } from '../../utils/messageTime';
 import { 
   FileText, Download, ShieldCheck, Activity, CheckCircle2, 
   Clock, AlertTriangle, MessageSquare, ArrowDown, Sparkles,
@@ -210,7 +211,7 @@ export const WorkstreamActivityStream: React.FC<WorkstreamActivityStreamProps> =
                   </div>
                 )}
                 {!isFailed && !isSending && (
-                  <span className="text-slate-400">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  <span className="text-slate-400">{formatMessageTime(msg.timestamp)}</span>
                 )}
               </div>
             </div>

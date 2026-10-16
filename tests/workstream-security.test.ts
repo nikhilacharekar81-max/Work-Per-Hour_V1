@@ -283,6 +283,16 @@ async function run() {
   assert.strictEqual(delivered.json.order.status, 'delivered');
   ok('delivery: empty list / missing / not-yours uploads rejected; real upload and any free-form link text accepted');
 
+  // 9b. stored messages: ISO timestamps (no "Invalid Date") and text kept exactly as typed
+  const typed = '<b>5 < 6 & 7</b> javascript:alert(1)';
+  const posted = await api(`/api/orders/${ORDER}/message`, { method: 'POST', token: buyer, body: { text: typed, type: 'message' } });
+  assert.strictEqual(posted.status, 200);
+  assert.strictEqual(posted.json.message.text, typed, 'message text stored verbatim (no HTML-escaping)');
+  const thread = await api(`/api/messages/${ORDER}`, { token: buyer });
+  assert.ok(thread.json.length > 0);
+  for (const m of thread.json) assert.ok(!Number.isNaN(new Date(m.timestamp).getTime()), `message timestamp must be parseable: ${m.timestamp}`);
+  ok('messages: verbatim text, every timestamp parseable');
+
   // 10. buyer can now download the delivered file; outsider still cannot
   assert.strictEqual((await api(fileUrl, { token: buyer })).status, 200);
   assert.strictEqual((await api(fileUrl, { token: outsider })).status, 403);

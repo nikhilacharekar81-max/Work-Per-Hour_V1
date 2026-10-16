@@ -126,7 +126,7 @@ export function useWorkstreamReview({
           senderId: 'system',
           senderName: 'WorkSphere Reviews',
           text: `⭐ Review submitted (${createdReview.rating}/5 stars): "${createdReview.comment}"`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timestamp: new Date().toISOString(),
           type: 'system',
           metadata: {
             action: 'review_submitted',

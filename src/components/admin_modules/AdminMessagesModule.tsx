@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { formatMessageTime } from '../../utils/messageTime';
 import {
   MessageSquare, Search, Filter, Eye, AlertTriangle, ShieldCheck,
   Clock, X, Check, RefreshCw, ChevronLeft, ChevronRight,
@@ -504,7 +505,7 @@ export const AdminMessagesModule: React.FC<AdminMessagesModuleProps> = ({
                       <span className="text-xs font-bold text-slate-900">{msg.senderName}</span>
                       <span className="text-[10px] uppercase font-bold text-slate-400">({msg.senderRole})</span>
                     </div>
-                    <span className="text-[10px] text-slate-400">{msg.timestamp}</span>
+                    <span className="text-[10px] text-slate-400">{formatMessageTime(msg.timestamp)}</span>
                   </div>
                   <p className="text-xs text-slate-700">{msg.text}</p>
                   {msg.flagged && (

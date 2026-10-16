@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Message, Order } from '../../types';
 import { getAuthToken } from '../../utils/authToken';
+import { compareMessageTime } from '../../utils/messageTime';
 
 export interface UseWorkstreamRealtimeProps {
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
@@ -12,6 +13,8 @@ export interface UseWorkstreamRealtimeProps {
   hasOrder?: (orderId: string) => boolean;
   /** Called when a message arrives for an order the user doesn't have yet (e.g. a new project chat). */
   onUnknownOrder?: () => void;
+  /** Called (debounced) when a system/lifecycle message arrives, so order status can be refetched. */
+  onOrderStateChanged?: () => void;
 }
 
 /**
@@ -25,13 +28,17 @@ export function useWorkstreamRealtime({
   impersonatedUser,
   onReconnect,
   hasOrder,
-  onUnknownOrder
+  onUnknownOrder,
+  onOrderStateChanged
 }: UseWorkstreamRealtimeProps) {
   const wsRef = useRef<WebSocket | null>(null);
   const hasOrderRef = useRef(hasOrder);
   hasOrderRef.current = hasOrder;
   const onUnknownOrderRef = useRef(onUnknownOrder);
   onUnknownOrderRef.current = onUnknownOrder;
+  const onOrderStateChangedRef = useRef(onOrderStateChanged);
+  onOrderStateChangedRef.current = onOrderStateChanged;
+  const stateRefreshTimerRef = useRef<any>(null);
   const lastUnknownRefreshRef = useRef(0);
 
   useEffect(() => {
@@ -64,6 +71,11 @@ export function useWorkstreamRealtime({
               lastUnknownRefreshRef.current = Date.now();
               onUnknownOrderRef.current?.();
             }
+            // Delivery, revision, release, dispute etc. arrive as system messages; refetch orders so status follows.
+            if (incomingMsg.type === 'system' && onOrderStateChangedRef.current) {
+              if (stateRefreshTimerRef.current) clearTimeout(stateRefreshTimerRef.current);
+              stateRefreshTimerRef.current = setTimeout(() => onOrderStateChangedRef.current?.(), 400);
+            }
             setMessages(prev => {
               // One-per-order lifecycle events may already exist locally under a different (client-made) id.
               const singletonAction = incomingMsg.type === 'system' && ['escrow_released', 'review_submitted', 'order_auto_accepted'].includes(incomingMsg.metadata?.action)
@@ -78,7 +90,7 @@ export function useWorkstreamRealtime({
                 return prev.map(m => isSame(m) ? { ...incomingMsg, status: 'sent' } : m);
               }
               const next = [...prev, incomingMsg];
-              return next.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+              return next.sort(compareMessageTime);
             });
             setOrders(prev => prev.map(o => {
               if (o.id === incomingMsg.orderId) {
