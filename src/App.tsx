@@ -3941,9 +3941,26 @@ export default function App() {
                         <span>Open Workstream</span>
                       </a>
                       <button 
-                        onClick={() => {
-                          setOrders(prev => prev.map(o => o.id === selectedOrder.id ? { ...o, status: 'completed' } : o));
-                          alert('Milestone approved and escrow funds released to seller!');
+                        onClick={async () => {
+                          const token = getAuthToken();
+                          try {
+                            const res = await fetch('/api/payments/escrow/release', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
+                              body: JSON.stringify({ orderId: selectedOrder.id, requestKey: `ui-release-${selectedOrder.id}` })
+                            });
+                            const data = await res.json().catch(() => ({}));
+                            if (!res.ok) {
+                              alert(data.error || 'Failed to release escrow funds.');
+                              return;
+                            }
+                            const updated = data.order || { ...selectedOrder, status: 'completed' };
+                            setOrders(prev => prev.map(o => o.id === selectedOrder.id ? updated : o));
+                            setSelectedOrder(updated);
+                            alert('Milestone approved and escrow funds released to seller!');
+                          } catch (err) {
+                            alert('Network error releasing escrow funds. Please try again.');
+                          }
                         }}
                         className="px-5 py-2.5 text-xs font-semibold text-fiverr-dark bg-emerald-400 rounded-xl hover:bg-emerald-300 transition-colors flex items-center gap-2"
                       >

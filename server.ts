@@ -2429,9 +2429,12 @@ app.post('/api/orders/:id/deliverable', requireAuth, (req, res) => {
     }
 
     // Only permit delivery submission from valid active states
-    const allowedStatuses = ['funded_in_escrow', 'in_progress', 'revision', 'draft_review', 'delivered', 'work_in_progress'];
+    const allowedStatuses = ['funded_in_escrow', 'in_progress', 'revision', 'draft_review', 'delivered', 'work_in_progress', 'completed'];
     if (!allowedStatuses.includes(order.status)) {
       return res.status(409).json({ error: `Cannot submit a deliverable for an order in "${order.status}" status.` });
+    }
+    if (order.status === 'completed') {
+      return res.status(400).json({ error: 'Cannot submit a deliverable for a completed order.' });
     }
 
     if (!order.deliverableFiles) order.deliverableFiles = [];
@@ -3168,10 +3171,9 @@ app.post('/api/payments/escrow/release', requireAuth, (req, res) => {
       return res.status(400).json({ error: 'Cannot release escrow: Order is under active dispute. Resolve the dispute first.' });
     }
 
-    const hasDelivery = (Array.isArray(order.deliverableFiles) && order.deliverableFiles.length > 0) || (Array.isArray(order.deliveryHistory) && order.deliveryHistory.length > 0) || order.status === 'delivered';
-    if (!isAdmin && !hasDelivery) {
-      return res.status(400).json({ error: 'Cannot release escrow before work has been delivered by the freelancer.' });
-    }
+    // Marketplace rule: once escrow is funded (e.g. the seller raised an invoice and it was paid into escrow),
+    // the buyer may release it at any time. No "work delivered" prerequisite. The ledger check below still
+    // guarantees funds exist, are not already released/refunded, and that disputes block release.
 
     // If releasing while in revision, mark all requested revisions as resolved
     if (order.status === 'revision' && Array.isArray(order.revisions)) {

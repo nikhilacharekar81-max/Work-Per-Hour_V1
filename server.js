@@ -33255,9 +33255,12 @@ app.post("/api/orders/:id/deliverable", requireAuth, (req, res) => {
     if (!isAdmin && order.sellerId !== authUserId) {
       return res.status(403).json({ error: "Forbidden: Only the seller or an administrator can submit deliverables." });
     }
-    const allowedStatuses = ["funded_in_escrow", "in_progress", "revision", "draft_review", "delivered", "work_in_progress"];
+    const allowedStatuses = ["funded_in_escrow", "in_progress", "revision", "draft_review", "delivered", "work_in_progress", "completed"];
     if (!allowedStatuses.includes(order.status)) {
       return res.status(409).json({ error: `Cannot submit a deliverable for an order in "${order.status}" status.` });
+    }
+    if (order.status === "completed") {
+      return res.status(400).json({ error: "Cannot submit a deliverable for a completed order." });
     }
     if (!order.deliverableFiles) order.deliverableFiles = [];
     if (!order.deliveryHistory) order.deliveryHistory = [];
@@ -33836,10 +33839,6 @@ app.post("/api/payments/escrow/release", requireAuth, (req, res) => {
     const activeDispute = disputes.find((d) => d.orderId === order.id && (d.status === "open" || d.status === "under_investigation"));
     if (activeDispute || order.status === "disputed") {
       return res.status(400).json({ error: "Cannot release escrow: Order is under active dispute. Resolve the dispute first." });
-    }
-    const hasDelivery = Array.isArray(order.deliverableFiles) && order.deliverableFiles.length > 0 || Array.isArray(order.deliveryHistory) && order.deliveryHistory.length > 0 || order.status === "delivered";
-    if (!isAdmin && !hasDelivery) {
-      return res.status(400).json({ error: "Cannot release escrow before work has been delivered by the freelancer." });
     }
     if (order.status === "revision" && Array.isArray(order.revisions)) {
       for (const rev of order.revisions) {

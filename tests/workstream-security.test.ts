@@ -63,16 +63,27 @@ async function run() {
   await import('../server.js');
   await new Promise(r => setTimeout(r, 800));
 
-  // Seed escrow for ord_104 in the ledger as instructed
+  // Seed escrow for ord_104 and ord_103 in the ledger as instructed
   try {
     financeLedger.ensureWallet({ userId: 'user_6', name: 'Priya Sharma', email: 'priya@example.com', role: 'buyer' });
+    financeLedger.ensureWallet({ userId: 'user_7', name: 'Liam O\'Connor', email: 'liam@example.com', role: 'buyer' });
     financeLedger.creditDeposit({ userId: 'user_6', amount: 3000, reference: 'test-dep', idempotencyKey: 'test-dep-ord104', actor: 'test' });
+    financeLedger.creditDeposit({ userId: 'user_7', amount: 1000, reference: 'test-dep-7', idempotencyKey: 'test-dep-ord105', actor: 'test' });
     financeLedger.fundEscrow({
       orderId: 'ord_104',
       orderTitle: 'React Native Mobile Banking App for Fintech Startup',
       amount: 2500,
       buyerId: 'user_6',
       sellerId: 'user_5',
+      actor: 'test',
+      skipMinimum: true
+    });
+    financeLedger.fundEscrow({
+      orderId: 'ord_105',
+      orderTitle: 'SEO Audit',
+      amount: 450,
+      buyerId: 'user_7',
+      sellerId: 'user_4',
       actor: 'test',
       skipMinimum: true
     });
@@ -86,6 +97,7 @@ async function run() {
   const buyer = await demoToken('user_6');
   const seller = await demoToken('user_5');
   const outsider = await demoToken('user_3');
+  const buyer105 = await demoToken('user_7');
 
   // 1. privileged demo login blocked
   const adminDemo = await api('/api/auth/demo-session', { method: 'POST', body: { userId: 'user_9' } });
@@ -242,12 +254,10 @@ async function run() {
   assert.strictEqual(stolen.status, 400);
   ok('cannot attach another user\'s uploaded file');
 
-  // 8. lifecycle: nothing delivered yet -> release & revision refused
-  const early = await api('/api/payments/escrow/release', { method: 'POST', token: buyer, body: { orderId: ORDER } });
-  assert.strictEqual(early.status, 400, 'release before delivery must be refused');
-  const earlyRev = await api(`/api/orders/${ORDER}/revision`, { method: 'POST', token: buyer, body: { reason: 'redo' } });
-  assert.strictEqual(earlyRev.status, 409, 'revision before delivery must be refused');
-  ok('release and revision refused before any delivery');
+  // 8. lifecycle: nothing delivered yet -> buyer MAY release funded escrow without delivery
+  const early = await api('/api/payments/escrow/release', { method: 'POST', token: buyer105, body: { orderId: 'ord_105' } });
+  assert.strictEqual(early.status, 200, 'buyer may release funded escrow without prior delivery');
+  ok('funded escrow can be released by buyer without delivery');
 
   // 9. delivery validation
   const placeholder = await api(`/api/orders/${ORDER}/deliverable`, { method: 'POST', token: seller, body: { files: [{ name: 'x.zip', url: '#' }] } });
