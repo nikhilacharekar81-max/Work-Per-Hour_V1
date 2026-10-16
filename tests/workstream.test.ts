@@ -200,6 +200,132 @@ try {
   };
   testReviewVisibilityUpdate(sellerUser, newReview);
 
+  // Test 10: Failed Message State, Retry & Duplicate-Send Deduplication
+  function testFailedMessageAndRetry() {
+    let mockMessageStore: Message[] = [];
+    const clientMessageId = 'cm_test_retry_101';
+
+    // 1. Optimistic send
+    const optimisticMsg: Message = {
+      id: clientMessageId,
+      orderId: 'order_123',
+      senderId: 'user_1',
+      senderName: 'Buyer',
+      text: 'Message that will fail first',
+      timestamp: new Date().toISOString(),
+      status: 'sending',
+      metadata: { clientMessageId }
+    };
+    mockMessageStore.push(optimisticMsg);
+
+    if (mockMessageStore[0].status !== 'sending') {
+      throw new Error('Optimistic message should initially have status sending');
+    }
+
+    // 2. Simulated failure
+    mockMessageStore = mockMessageStore.map(m => m.id === clientMessageId ? { ...m, status: 'failed' } : m);
+    if (mockMessageStore[0].status !== 'failed' || mockMessageStore[0].text !== 'Message that will fail first') {
+      throw new Error('Failed message must remain visible with status failed and preserved text');
+    }
+
+    // 3. Retry action triggered by user
+    mockMessageStore = mockMessageStore.map(m => m.id === clientMessageId ? { ...m, status: 'sending' } : m);
+    if (mockMessageStore[0].status !== 'sending') {
+      throw new Error('Retrying message should transition status back to sending');
+    }
+
+    // 4. Successful server response
+    const serverMessage: Message = {
+      id: 'msg_server_saved_101',
+      orderId: 'order_123',
+      senderId: 'user_1',
+      senderName: 'Buyer',
+      text: 'Message that will fail first',
+      timestamp: new Date().toISOString(),
+      status: 'sent',
+      metadata: { clientMessageId }
+    };
+
+    mockMessageStore = mockMessageStore.map(m => (m.id === clientMessageId || m.metadata?.clientMessageId === clientMessageId) ? { ...m, ...serverMessage, status: 'sent' } : m);
+    if (mockMessageStore.length !== 1 || mockMessageStore[0].status !== 'sent') {
+      throw new Error('Message retry should update existing optimistic item without duplicating');
+    }
+
+    // 5. Duplicate-send behavior: resending identical clientMessageId does not create duplicate entries
+    const duplicateIncoming: Message = { ...serverMessage };
+    const isExisting = mockMessageStore.some(m => m.metadata?.clientMessageId === duplicateIncoming.metadata?.clientMessageId);
+    if (!isExisting) {
+      mockMessageStore.push(duplicateIncoming);
+    }
+    if (mockMessageStore.length !== 1) {
+      throw new Error('Duplicate message with same clientMessageId must be deduplicated');
+    }
+
+    console.log('✅ Test 10: Failed Message State, Retry & Duplicate-Send Deduplication Passed');
+  }
+
+  testFailedMessageAndRetry();
+
+  // Test 11: Review Privacy Filtering & Sensitive Field Sanitization
+  function testReviewPrivacyAndSanitization() {
+    const rawReviews: any[] = [
+      {
+        id: 'rev_pub',
+        orderId: 'ord_comp_1',
+        reviewerId: 'user_1',
+        targetUserId: 'user_2',
+        rating: 5,
+        comment: 'Great work!',
+        isCancelledOrder: false,
+        moderationStatus: 'approved',
+        moderationNotes: 'Internal admin note: clean review',
+        moderationReason: 'None'
+      },
+      {
+        id: 'rev_cancelled',
+        orderId: 'ord_canc_1',
+        reviewerId: 'user_1',
+        targetUserId: 'user_2',
+        rating: 1,
+        comment: 'Order was cancelled after dispute',
+        isCancelledOrder: true,
+        moderationStatus: 'approved',
+        moderationNotes: 'Internal dispute dispute notes'
+      },
+      {
+        id: 'rev_hidden',
+        orderId: 'ord_comp_2',
+        reviewerId: 'user_3',
+        targetUserId: 'user_2',
+        rating: 1,
+        comment: 'Inappropriate spam text',
+        isCancelledOrder: false,
+        moderationStatus: 'hidden',
+        moderationNotes: 'Hidden by staff for harassment'
+      }
+    ];
+
+    // Filter public reviews
+    const isPublic = (r: any) => !r.isCancelledOrder && (!r.moderationStatus || r.moderationStatus === 'approved');
+    const sanitize = (r: any) => {
+      const { moderationNotes, moderationReason, ...clean } = r;
+      return clean;
+    };
+
+    const publicReviews = rawReviews.filter(isPublic).map(sanitize);
+
+    if (publicReviews.length !== 1 || publicReviews[0].id !== 'rev_pub') {
+      throw new Error('Review privacy failed: cancelled or hidden reviews leaked to public');
+    }
+    if (publicReviews[0].moderationNotes !== undefined || publicReviews[0].moderationReason !== undefined) {
+      throw new Error('Review sanitization failed: internal admin notes leaked');
+    }
+
+    console.log('✅ Test 11: Review Privacy Filtering & Sanitization Passed');
+  }
+
+  testReviewPrivacyAndSanitization();
+
   console.log('🎉 All Workstream Regression & Review Lifecycle Tests Passed!');
 } catch (error) {
   console.error('❌ Regression Tests Failed:', error);

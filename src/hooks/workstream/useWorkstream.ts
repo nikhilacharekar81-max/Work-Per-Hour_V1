@@ -22,11 +22,6 @@ export function useWorkstream(props?: any) {
   // so without this the filter hook always received [] and the workstream table was empty for every user.
   const filters = useWorkstreamFilters({ ...props, hydratedWorkstreamItems: list.hydratedWorkstreamItems });
   const selection = useWorkstreamSelection();
-  const messages = useWorkstreamMessages({
-    messages: props?.messages,
-    setMessages: props?.setMessages,
-    currentUserId: (props?.impersonatedUser || props?.currentUser)?.id
-  });
 
   // Synchronize authoritative selected order with updated orders list (Phase 29)
   const currentSelectedOrder = useMemo(() => {
@@ -35,6 +30,13 @@ export function useWorkstream(props?: any) {
     const authoritative = list.hydratedWorkstreamItems.find(o => o.id === raw.id);
     return authoritative || raw;
   }, [props?.selectedOrder, selection.selectedOrder, list.hydratedWorkstreamItems]);
+
+  const messages = useWorkstreamMessages({
+    messages: props?.messages,
+    setMessages: props?.setMessages,
+    currentUserId: (props?.impersonatedUser || props?.currentUser)?.id,
+    activeOrderId: currentSelectedOrder?.id
+  });
   
   const onReconnect = useCallback(() => {
     if (currentSelectedOrder) {

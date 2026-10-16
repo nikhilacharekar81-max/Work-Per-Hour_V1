@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { 
   FileText, Download, ShieldCheck, Activity, CheckCircle2, 
   Clock, AlertTriangle, MessageSquare, ArrowDown, Sparkles,
-  FileSignature, Receipt, Lock, Loader2
+  FileSignature, Receipt, Lock, Loader2, RotateCcw
 } from 'lucide-react';
 import { WorkstreamMessage, WorkstreamOffer } from './types';
 import { UserAccount } from '../../types';
@@ -18,6 +18,7 @@ interface WorkstreamActivityStreamProps {
   buyerId?: string;
   sellerId?: string;
   onOfferAction?: (offerId: string, action: 'accept' | 'decline' | 'cancel') => Promise<{ ok: boolean; error?: string }>;
+  onRetryMessage?: (msg: WorkstreamMessage) => void;
 }
 
 export const WorkstreamActivityStream: React.FC<WorkstreamActivityStreamProps> = ({
@@ -29,7 +30,8 @@ export const WorkstreamActivityStream: React.FC<WorkstreamActivityStreamProps> =
   offers = [],
   buyerId,
   sellerId,
-  onOfferAction
+  onOfferAction,
+  onRetryMessage
 }) => {
   const scrollEndRef = useRef<HTMLDivElement>(null);
   const [busyOfferId, setBusyOfferId] = useState<string | null>(null);
@@ -149,28 +151,68 @@ export const WorkstreamActivityStream: React.FC<WorkstreamActivityStreamProps> =
         const avatarUrl = msg.senderAvatar || senderObj?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop';
         const senderName = msg.senderName || senderObj?.name || (isMe ? 'You' : 'Partner');
 
+        const isFailed = msg.status === 'failed';
+        const isSending = msg.status === 'sending';
+
         return (
           <div key={msg.id} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''}`}>
             <img src={avatarUrl} alt={senderName} className="w-8 h-8 rounded-full object-cover shrink-0" />
             <div className={`flex flex-col gap-1 ${isMe ? 'items-end' : 'items-start'}`}>
               <span className="text-[10px] font-bold text-slate-400 px-1">{senderName}</span>
-              <div className={`px-4 py-3 rounded-2xl text-xs max-w-sm ${isMe ? 'bg-slate-900 text-white rounded-tr-none' : 'bg-white border border-slate-200 rounded-tl-none shadow-xs'}`}>
+              <div className={`px-4 py-3 rounded-2xl text-xs max-w-sm ${
+                isFailed
+                  ? 'bg-rose-50 border border-rose-300 text-rose-900 rounded-tr-none'
+                  : isMe
+                    ? 'bg-slate-900 text-white rounded-tr-none'
+                    : 'bg-white border border-slate-200 rounded-tl-none shadow-xs'
+              }`}>
                 {msg.type === 'file' && msg.fileInfo ? (
                   <div className="flex items-center gap-3">
-                    <div className="p-2 bg-emerald-50 rounded-xl text-emerald-600"><FileText className="w-4 h-4" /></div>
+                    <div className={`p-2 rounded-xl ${isFailed ? 'bg-rose-100 text-rose-700' : 'bg-emerald-50 text-emerald-600'}`}><FileText className="w-4 h-4" /></div>
                     <div className="flex-1">
                       <div className="font-bold">{msg.fileInfo.name}</div>
                       <div className="text-[10px] opacity-70">{msg.fileInfo.size}</div>
                     </div>
-                    <button onClick={() => onDownloadFile?.(msg.fileInfo!)} className="p-2 hover:bg-white/10 rounded-lg cursor-pointer transition">
-                      <Download className="w-4 h-4" />
-                    </button>
+                    {!isFailed && (
+                      <button onClick={() => onDownloadFile?.(msg.fileInfo!)} className="p-2 hover:bg-white/10 rounded-lg cursor-pointer transition">
+                        <Download className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <p className="leading-relaxed whitespace-pre-wrap">{msg.text}</p>
                 )}
               </div>
-              <span className="text-[9px] text-slate-400 px-1">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+
+              {/* Status and retry bar */}
+              <div className="flex items-center gap-1.5 px-1 text-[9px]">
+                {isFailed && (
+                  <div className="flex items-center gap-1.5 text-rose-600 font-semibold">
+                    <AlertTriangle className="w-3 h-3 text-rose-500" />
+                    <span>Failed to send</span>
+                    {isMe && onRetryMessage && (
+                      <button
+                        type="button"
+                        onClick={() => onRetryMessage(msg)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded-md font-bold transition cursor-pointer"
+                        title="Retry sending this message"
+                      >
+                        <RotateCcw className="w-2.5 h-2.5" />
+                        <span>Retry</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+                {isSending && (
+                  <div className="flex items-center gap-1 text-slate-400">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Sending...</span>
+                  </div>
+                )}
+                {!isFailed && !isSending && (
+                  <span className="text-slate-400">{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                )}
+              </div>
             </div>
           </div>
         );

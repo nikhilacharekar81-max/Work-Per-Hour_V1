@@ -27,6 +27,7 @@ interface WorkstreamWorkspaceProps {
   partner?: UserAccount;
   onBack: () => void;
   onSendMessage: (text: string) => void;
+  onRetryMessage?: (msg: WorkstreamMessage) => void;
   onAttachFile: (file: { name: string; size: string; url: string }) => void;
   /** Creates a system event record. */
   sendEvent: (orderId: string, text: string, type: 'system', metadata: Record<string, any>, onError: (msg: string) => void) => void;
@@ -55,6 +56,7 @@ export const WorkstreamWorkspace: React.FC<WorkstreamWorkspaceProps> = ({
   partner,
   onBack,
   onSendMessage,
+  onRetryMessage,
   onAttachFile,
   sendEvent,
   onOrderChanged,
@@ -362,6 +364,7 @@ export const WorkstreamWorkspace: React.FC<WorkstreamWorkspaceProps> = ({
                     buyerId={order.buyerId}
                     sellerId={order.sellerId}
                     onOfferAction={handleOfferAction}
+                    onRetryMessage={onRetryMessage}
                   />
                   <WorkstreamMessageInput
                     key={order.id}

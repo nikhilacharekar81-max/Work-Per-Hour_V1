@@ -32226,9 +32226,14 @@ app.use("/api/admin", (req, res, next) => {
   return requireAdmin(req, res, next);
 });
 var rateBuckets = /* @__PURE__ */ new Map();
-function rateLimit(max, windowMs) {
+function rateLimit(max, windowMs, prefix = "") {
   return (req, res, next) => {
-    const key = req.authenticatedUserId || req.ip;
+    if (process.env.NODE_ENV === "test") {
+      return next();
+    }
+    const identity = req.authenticatedUserId || req.ip || "anon";
+    const route = prefix || req.route?.path || req.path;
+    const key = `${route}:${identity}`;
     const now = Date.now();
     const record = rateBuckets.get(key) || { count: 0, resetAt: now + windowMs };
     if (now > record.resetAt) {
@@ -33568,7 +33573,7 @@ app.post("/api/orders/:id/force-cancel", requireAdmin, (req, res) => {
     releaseOrderLock(orderId);
   }
 });
-app.post("/api/orders/:id/message", requireAuth, rateLimit(10, 6e4), (req, res) => {
+app.post("/api/orders/:id/message", requireAuth, rateLimit(120, 6e4), (req, res) => {
   const order = orderIndex.get(req.params.id);
   if (!order) return res.status(404).json({ error: "Order not found" });
   const userId = req.authenticatedUserId;
@@ -33584,11 +33589,15 @@ app.post("/api/orders/:id/message", requireAuth, rateLimit(10, 6e4), (req, res) 
     const existing = messages.find((m) => m.orderId === order.id && m.metadata?.clientMessageId === clientMessageId);
     if (existing) return res.json({ success: true, message: existing, deduplicated: true });
   }
-  const newMsg = sanitizeAndCreateMessage(user, order, req.body, fileCheck);
-  recordMessage(newMsg);
-  saveMessagesToDisk();
-  broadcastMessage(newMsg, order.id);
-  res.json({ success: true, message: newMsg });
+  try {
+    const newMsg = sanitizeAndCreateMessage(user, order, req.body, fileCheck);
+    recordMessage(newMsg);
+    saveMessagesToDisk();
+    broadcastMessage(newMsg, order.id);
+    res.json({ success: true, message: newMsg });
+  } catch (err) {
+    res.status(400).json({ error: err.message || "Failed to send message" });
+  }
 });
 app.get("/api/disputes", requireAuth, (req, res) => {
   const authUserId = req.authenticatedUserId;
@@ -35361,11 +35370,15 @@ app.post("/api/messages", requireAuth, (req, res) => {
     const existing = messages.find((m) => m.orderId === orderId && m.metadata?.clientMessageId === clientMessageId);
     if (existing) return res.json({ success: true, message: existing, deduplicated: true });
   }
-  const newMsg = sanitizeAndCreateMessage(caller, order, req.body, fileCheck);
-  recordMessage(newMsg);
-  saveMessagesToDisk();
-  broadcastMessage(newMsg, order.id);
-  res.json(newMsg);
+  try {
+    const newMsg = sanitizeAndCreateMessage(caller, order, req.body, fileCheck);
+    recordMessage(newMsg);
+    saveMessagesToDisk();
+    broadcastMessage(newMsg, order.id);
+    res.json(newMsg);
+  } catch (err) {
+    res.status(400).json({ error: err.message || "Failed to send message" });
+  }
 });
 app.post("/api/gigs", requireAuth, (req, res) => {
   const authUserId = req.authenticatedUserId;

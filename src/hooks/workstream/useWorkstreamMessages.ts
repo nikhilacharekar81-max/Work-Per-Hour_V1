@@ -12,6 +12,8 @@ export interface UseWorkstreamMessagesOptions {
   setMessages?: Dispatch<SetStateAction<Message[]>>;
   /** Used as the sender of optimistic messages so they render on the sender's side immediately. */
   currentUserId?: string;
+  /** Active order ID for the workstream, used as fallback if activeFetchOrderIdRef hasn't run yet. */
+  activeOrderId?: string;
 }
 
 export function useWorkstreamMessages(options: UseWorkstreamMessagesOptions = {}) {
@@ -22,6 +24,8 @@ export function useWorkstreamMessages(options: UseWorkstreamMessagesOptions = {}
   const setMessages = options.setMessages ?? setOwnMessages;
   const currentUserIdRef = useRef<string | undefined>(options.currentUserId);
   currentUserIdRef.current = options.currentUserId;
+  const activeOrderIdRef = useRef<string | undefined>(options.activeOrderId);
+  activeOrderIdRef.current = options.activeOrderId;
   const [newMessageText, setNewMessageText] = useState('');
   
   // Guard against out-of-order responses when user rapidly switches workstreams
@@ -78,8 +82,8 @@ export function useWorkstreamMessages(options: UseWorkstreamMessagesOptions = {}
     }
   }, []);
 
-  const sendMessage = useCallback(async (text: string, type: string = 'text', fileInfo?: any) => {
-    const activeOrderId = activeFetchOrderIdRef.current;
+  const sendMessage = useCallback(async (text: string, type: string = 'text', fileInfo?: any, targetOrderId?: string) => {
+    const activeOrderId = targetOrderId || activeFetchOrderIdRef.current || activeOrderIdRef.current;
     if (!activeOrderId || !text.trim()) return;
 
     const token = getAuthToken();
@@ -121,7 +125,8 @@ export function useWorkstreamMessages(options: UseWorkstreamMessagesOptions = {}
 
         if (res.ok) {
           const data = await res.json();
-          setMessages(prev => prev.map(m => m.id === clientMessageId ? { ...data.message, status: 'sent' } : m));
+          const serverMsg = data.message || data;
+          setMessages(prev => prev.map(m => m.id === clientMessageId ? { ...m, ...serverMsg, status: 'sent' } : m));
         } else {
           throw new Error('Server error');
         }
@@ -189,6 +194,44 @@ export function useWorkstreamMessages(options: UseWorkstreamMessagesOptions = {}
     sendToServer();
   }, [setMessages]);
 
+  const retryMessage = useCallback(async (msg: Message) => {
+    if (!msg || !msg.orderId) return;
+    const token = getAuthToken();
+    if (!token) return;
+
+    const clientMessageId = msg.metadata?.clientMessageId || msg.id;
+
+    // Optimistically update failed message state back to sending
+    setMessages(prev => prev.map(m => (m.id === msg.id || m.id === clientMessageId) ? { ...m, status: 'sending' } : m));
+
+    try {
+      const res = await fetch(`/api/orders/${msg.orderId}/message`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          text: msg.text,
+          type: msg.type || 'message',
+          fileInfo: msg.fileInfo,
+          clientMessageId
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const serverMsg = data.message || data;
+        setMessages(prev => prev.map(m => (m.id === msg.id || m.id === clientMessageId) ? { ...m, ...serverMsg, status: 'sent' } : m));
+      } else {
+        throw new Error('Server error');
+      }
+    } catch (err) {
+      console.error('Error retrying message:', err);
+      setMessages(prev => prev.map(m => (m.id === msg.id || m.id === clientMessageId) ? { ...m, status: 'failed' } : m));
+    }
+  }, [setMessages]);
+
   return {
     messages,
     setMessages,
@@ -196,6 +239,7 @@ export function useWorkstreamMessages(options: UseWorkstreamMessagesOptions = {}
     setNewMessageText,
     fetchMessages,
     sendMessage,
+    retryMessage,
     sendEvent
   };
 }

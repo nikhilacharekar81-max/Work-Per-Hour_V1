@@ -34,7 +34,9 @@ export interface WorkstreamMessage {
     action?: string;
     offerId?: string;
     offerKind?: string;
+    clientMessageId?: string;
   };
+  status?: 'sending' | 'sent' | 'failed';
 }
 
 export type WorkstreamOfferKind = 'proposal' | 'invoice' | 'deposit';

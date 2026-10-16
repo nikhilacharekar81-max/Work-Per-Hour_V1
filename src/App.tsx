@@ -572,6 +572,7 @@ export default function App() {
     handleStartWorkstreamModalSubmit,
     wsRef,
     sendMessage,
+    retryMessage,
     sendEvent,
     isReviewModalOpen,
     setIsReviewModalOpen,
@@ -3996,6 +3997,7 @@ export default function App() {
                       navigate('/messages');
                     }}
                     onSendMessage={(text) => sendMessage(text, 'message')}
+                    onRetryMessage={retryMessage}
                     onAttachFile={(file) => sendMessage(`Attached file: ${file.name}`, 'file', file)}
                     onReleaseEscrow={handleReleaseEscrow}
                     onDeliverWork={handleDeliverWork}

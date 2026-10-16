@@ -149,6 +149,45 @@ async function run() {
   assert.strictEqual(legitimate.json.message.metadata.action, 'requirement_logged');
   assert.strictEqual(legitimate.json.message.metadata.requirementText, 'Dark mode support');
 
+  // Verify failure, retry, and duplicate-send behavior
+  // A. Message fails when text is empty (400)
+  const failSend = await api(`/api/orders/${ORDER}/message`, {
+    method: 'POST',
+    token: buyer,
+    body: { text: '   ', clientMessageId: 'cm_retry_flow_1' }
+  });
+  assert.strictEqual(failSend.status, 400, 'Empty message text must return 400 error');
+
+  // B. Retry action with the same clientMessageId succeeds once text is corrected
+  const retrySend = await api(`/api/orders/${ORDER}/message`, {
+    method: 'POST',
+    token: buyer,
+    body: { text: 'Now corrected text on retry', clientMessageId: 'cm_retry_flow_1' }
+  });
+  assert.strictEqual(retrySend.status, 200, 'Retry message must succeed with 200');
+  assert.strictEqual(retrySend.json.message.text, 'Now corrected text on retry');
+  assert.strictEqual(retrySend.json.message.metadata.clientMessageId, 'cm_retry_flow_1');
+
+  // C. Duplicate-send behavior: resending same clientMessageId returns original message and deduplicated: true
+  const duplicateSend = await api(`/api/orders/${ORDER}/message`, {
+    method: 'POST',
+    token: buyer,
+    body: { text: 'Now corrected text on retry', clientMessageId: 'cm_retry_flow_1' }
+  });
+  assert.strictEqual(duplicateSend.status, 200);
+  assert.strictEqual(duplicateSend.json.deduplicated, true);
+  assert.strictEqual(duplicateSend.json.message.id, retrySend.json.message.id);
+
+  // D. Normal messaging is unrestricted and responsive: rapid successive messages succeed
+  for (let i = 0; i < 5; i++) {
+    const rapidMsg = await api(`/api/orders/${ORDER}/message`, {
+      method: 'POST',
+      token: seller,
+      body: { text: `Responsive chat message #${i + 1}`, clientMessageId: `cm_rapid_${i + 1}` }
+    });
+    assert.strictEqual(rapidMsg.status, 200, `Rapid chat message #${i + 1} should succeed immediately`);
+  }
+
   ok('sending: outsider/anonymous rejected, participant accepted, retries deduplicated, metadata forgery prevented');
 
   // 4. WebSocket authentication
