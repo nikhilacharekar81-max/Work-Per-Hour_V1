@@ -2280,19 +2280,21 @@ app.get('/api/my/projects', requireAuth, (req, res) => {
 app.get('/api/proposals', (req, res) => {
   const authUserId = resolveAuthenticatedUserId(req);
   if (!authUserId) {
-    return res.json(proposals);
+    // Bids and cover letters are private to the freelancer, the project owner and staff.
+    return res.json([]);
   }
   const caller = users.find(u => u.id === authUserId);
   const isAdmin = caller?.role === 'admin' || caller?.role === 'super_admin' || caller?.role === 'support';
-  const userProposals = proposals.filter(p => isAdmin || p.freelancerId === authUserId);
+  const userProposals = proposals.filter(p =>
+    isAdmin ||
+    p.freelancerId === authUserId ||
+    projects.some(pr => pr.id === p.projectId && pr.buyerId === authUserId));
   res.json(userProposals);
 });
 
-app.get('/api/orders', (req, res) => {
-  const authUserId = resolveAuthenticatedUserId(req);
-  if (!authUserId) {
-    return res.json(orders.map(o => enrichOrderWithServiceInfo(o, true)));
-  }
+app.get('/api/orders', requireAuth, (req, res) => {
+  // Login is required: previously a request with no token was treated like an admin and received every order.
+  const authUserId = resolveAuthenticatedUserId(req)!;
   const caller = users.find(u => u.id === authUserId);
   const isAdmin = caller?.role === 'admin' || caller?.role === 'super_admin' || caller?.role === 'support';
   const userOrders = orders.filter(o => isAdmin || o.buyerId === authUserId || o.sellerId === authUserId);
@@ -2300,13 +2302,14 @@ app.get('/api/orders', (req, res) => {
 });
 
 // Single Order Workspace Detail
-app.get('/api/orders/:id', (req, res) => {
+app.get('/api/orders/:id', requireAuth, (req, res) => {
   const order = orderIndex.get(req.params.id);
   if (!order) return res.status(404).json({ error: 'Order not found' });
-  const authUserId = resolveAuthenticatedUserId(req);
-  const caller = authUserId ? users.find(u => u.id === authUserId) : null;
-  const isAdmin = !authUserId || caller?.role === 'admin' || caller?.role === 'super_admin';
-  if (authUserId && !isAdmin && order.buyerId !== authUserId && order.sellerId !== authUserId) {
+  // Login is required: an anonymous caller used to count as admin and could read the whole order and its messages.
+  const authUserId = resolveAuthenticatedUserId(req)!;
+  const caller = users.find(u => u.id === authUserId);
+  const isAdmin = caller?.role === 'admin' || caller?.role === 'super_admin';
+  if (!isAdmin && order.buyerId !== authUserId && order.sellerId !== authUserId) {
     return res.status(403).json({ error: 'Forbidden: Access to this order is restricted to participants.' });
   }
   const enriched = enrichOrderWithServiceInfo(order, isAdmin);
@@ -5193,6 +5196,59 @@ app.patch('/api/gigs/:id/feature', (req, res) => {
   res.json(g);
 });
 
+/**
+ * Opens (or reuses) the private workstream between a project's owner and a freelancer who bid on it.
+ * The owner is the buyer and the freelancer is the seller, so the existing proposal / escrow flow
+ * (seller sends a Proposal, buyer accepts and pays into escrow) works unchanged inside this thread.
+ * Returns the workstream's order id, or undefined when no chat can be opened (the bid itself still stands).
+ */
+function openProjectChat(project: any, freelancer: any, proposal: Proposal): string | undefined {
+  try {
+    if (!project || !['open', 'published'].includes(project.status)) return undefined;
+    const owner = users.find(u => u.id === project.buyerId);
+    if (!owner || owner.status !== 'active' || owner.id === freelancer.id) return undefined;
+
+    let order: Order | undefined = orders.find(o =>
+      o.projectId === project.id && o.buyerId === owner.id && o.sellerId === freelancer.id &&
+      !['completed', 'cancelled'].includes(o.status));
+    if (!order) {
+      const created: Order = {
+        id: 'ord_' + randomUUID().slice(0, 12),
+        title: `Inquiry: ${project.title}`,
+        buyerId: owner.id, sellerId: freelancer.id,
+        amount: 0, status: 'in_progress',
+        createdAt: new Date().toISOString().split('T')[0],
+        dueDate: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+        projectId: project.id
+      };
+      order = enrichOrderWithServiceInfo(created) as Order;
+      recordOrder(order);
+      saveOrdersToDisk();
+    }
+
+    const sym = siteSettings.getFlattenedSettings().currencySymbol || '$';
+    const days = proposal.deliveryDays;
+    const text = `Proposal for "${project.title}"\nBid: ${sym}${proposal.bidAmount} · Delivery: ${days} day${days === 1 ? '' : 's'}\n\n${proposal.coverLetter}`.slice(0, 5000);
+    const msg: Message = {
+      id: 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+      orderId: order.id,
+      senderId: freelancer.id,
+      senderName: freelancer.name,
+      text,
+      timestamp: new Date().toISOString(),
+      type: 'message',
+      metadata: { action: 'project_proposal' }
+    };
+    recordMessage(msg);
+    saveMessagesToDisk();
+    broadcastMessage(msg, order.id);
+    return order.id;
+  } catch (err) {
+    console.error('Failed to open project chat for proposal:', err);
+    return undefined;
+  }
+}
+
 app.post('/api/proposals', requireAuth, (req, res) => {
   const authUserId = (req as any).authenticatedUserId;
   const caller = (req as any).authenticatedUser || users.find(u => u.id === authUserId);
@@ -5232,7 +5288,8 @@ app.post('/api/proposals', requireAuth, (req, res) => {
   proposals.unshift(newProp);
   const proj = projects.find(p => p.id === req.body.projectId);
   if (proj) proj.proposalsCount += 1;
-  res.json(newProp);
+  const workstreamOrderId = openProjectChat(proj, caller, newProp);
+  res.json({ ...newProp, workstreamOrderId });
 });
 
 app.post('/api/orders', requireAuth, rateLimit(30, 60_000), (req, res) => {

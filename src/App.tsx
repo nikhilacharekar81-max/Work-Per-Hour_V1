@@ -1804,12 +1804,17 @@ export default function App() {
         alert(data.error || 'Failed to submit proposal.');
         return;
       }
-      alert('Proposal submitted successfully!');
-      navigate('/projects');
       setProposalCover('');
       setProposalBid('');
       setProposalDays('');
-      refresh();
+      await refresh();
+      if (data.workstreamOrderId) {
+        alert('Proposal submitted! A private chat with the client has been opened.');
+        navigate(`/messages/${data.workstreamOrderId}`);
+      } else {
+        alert('Proposal submitted successfully!');
+        navigate('/projects');
+      }
     } catch (err: any) {
       alert(err?.message || 'Error submitting proposal');
     }
@@ -1844,8 +1849,13 @@ export default function App() {
         alert(data.error || 'Failed to submit proposal.');
         return;
       }
-      alert('Proposal submitted successfully!');
-      refresh();
+      await refresh();
+      if (data.workstreamOrderId) {
+        alert('Proposal submitted! A private chat with the client has been opened.');
+        navigate(`/messages/${data.workstreamOrderId}`);
+      } else {
+        alert('Proposal submitted successfully!');
+      }
     } catch (err: any) {
       alert(err?.message || 'Error submitting proposal');
     }

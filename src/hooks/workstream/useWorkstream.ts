@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useRef } from 'react';
 import { useWorkstreamList } from './useWorkstreamList';
 import { useWorkstreamFilters } from './useWorkstreamFilters';
 import { useWorkstreamSelection } from './useWorkstreamSelection';
@@ -42,7 +42,14 @@ export function useWorkstream(props?: any) {
     }
   }, [currentSelectedOrder, messages.fetchMessages]);
 
-  const realtime = useWorkstreamRealtime({ ...props, onReconnect });
+  const ordersRef = useRef<any[] | undefined>(props?.orders);
+  ordersRef.current = props?.orders;
+  const realtime = useWorkstreamRealtime({
+    ...props,
+    onReconnect,
+    hasOrder: (id: string) => (ordersRef.current || []).some((o: any) => o.id === id),
+    onUnknownOrder: props?.refresh
+  });
   const actions = useWorkstreamActions(props);
 
   const activeMessages = props?.messages || messages.messages;

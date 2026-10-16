@@ -8,6 +8,10 @@ export interface UseWorkstreamRealtimeProps {
   currentUser?: { id: string } | null;
   impersonatedUser?: { id: string } | null;
   onReconnect?: () => void;
+  /** True when the order is already in the user's list. */
+  hasOrder?: (orderId: string) => boolean;
+  /** Called when a message arrives for an order the user doesn't have yet (e.g. a new project chat). */
+  onUnknownOrder?: () => void;
 }
 
 /**
@@ -19,9 +23,16 @@ export function useWorkstreamRealtime({
   setOrders,
   currentUser,
   impersonatedUser,
-  onReconnect
+  onReconnect,
+  hasOrder,
+  onUnknownOrder
 }: UseWorkstreamRealtimeProps) {
   const wsRef = useRef<WebSocket | null>(null);
+  const hasOrderRef = useRef(hasOrder);
+  hasOrderRef.current = hasOrder;
+  const onUnknownOrderRef = useRef(onUnknownOrder);
+  onUnknownOrderRef.current = onUnknownOrder;
+  const lastUnknownRefreshRef = useRef(0);
 
   useEffect(() => {
     // Authenticate with the signed session token only. Never fall back to a user ID or an admin identity.
@@ -49,6 +60,10 @@ export function useWorkstreamRealtime({
           const data = JSON.parse(event.data);
           if (data.type === 'MESSAGE_RECEIVED' && data.message) {
             const incomingMsg = data.message;
+            if (hasOrderRef.current && !hasOrderRef.current(incomingMsg.orderId) && Date.now() - lastUnknownRefreshRef.current > 3000) {
+              lastUnknownRefreshRef.current = Date.now();
+              onUnknownOrderRef.current?.();
+            }
             setMessages(prev => {
               const clientMsgId = incomingMsg.metadata?.clientMessageId;
               const alreadyExists = prev.some(m => 
