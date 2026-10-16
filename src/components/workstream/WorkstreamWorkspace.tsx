@@ -16,6 +16,7 @@ import { WorkstreamRevisionModal } from './WorkstreamRevisionModal';
 import { WorkstreamReviewModal } from './WorkstreamReviewModal';
 import { WorkstreamVideoCallModal } from './WorkstreamVideoCallModal';
 import { getAuthToken } from '../../utils/authToken';
+import { classifyFileUrl, openWebLink } from '../../utils/safeFileLink';
 import { useWorkstreamOffers } from '../../hooks/workstream/useWorkstreamOffers';
 
 interface WorkstreamWorkspaceProps {
@@ -174,10 +175,15 @@ export const WorkstreamWorkspace: React.FC<WorkstreamWorkspaceProps> = ({
   };
 
   const handleDownloadFile = async (f: { name: string; url: string }) => {
-    if (!f.url || f.url === '#') {
+    if (!f.url) {
       alert(`"${f.name || 'This file'}" is unavailable: it has no valid download link.`);
       return;
     }
+    // User-provided links are never trusted: only uploaded files get the auth token, only http(s) opens a tab,
+    // everything else (javascript:, data:, free text...) stays plain text and is never navigated to or fetched.
+    const link0 = classifyFileUrl(f.url);
+    if (link0.kind === 'web') { openWebLink(link0.url); return; }
+    if (link0.kind === 'text') { alert(`${f.name || 'Deliverable'}:\n\n${link0.url}`); return; }
     // Files are access-controlled, so fetch with the session token and save the blob.
     try {
       const token = getAuthToken();

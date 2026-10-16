@@ -65,18 +65,17 @@ export function useWorkstreamRealtime({
               onUnknownOrderRef.current?.();
             }
             setMessages(prev => {
-              const clientMsgId = incomingMsg.metadata?.clientMessageId;
-              const alreadyExists = prev.some(m => 
-                m.id === incomingMsg.id || 
-                (clientMsgId && m.metadata?.clientMessageId === clientMsgId)
-              );
+              // One-per-order lifecycle events may already exist locally under a different (client-made) id.
+              const singletonAction = incomingMsg.type === 'system' && ['escrow_released', 'review_submitted', 'order_auto_accepted'].includes(incomingMsg.metadata?.action)
+                ? incomingMsg.metadata.action : null;
+              const isSame = (m: any) =>
+                m.id === incomingMsg.id ||
+                (clientMsgId && m.metadata?.clientMessageId === clientMsgId) ||
+                (singletonAction && m.type === 'system' && m.orderId === incomingMsg.orderId && m.metadata?.action === singletonAction);
+              const alreadyExists = prev.some(isSame);
               if (alreadyExists) {
                 // If it exists but was optimistic, update it with full server data
-                return prev.map(m => 
-                  (m.id === incomingMsg.id || (clientMsgId && m.metadata?.clientMessageId === clientMsgId))
-                    ? { ...incomingMsg, status: 'sent' }
-                    : m
-                );
+                return prev.map(m => isSame(m) ? { ...incomingMsg, status: 'sent' } : m);
               }
               const next = [...prev, incomingMsg];
               return next.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());

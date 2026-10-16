@@ -135,7 +135,7 @@ export function useWorkstreamReview({
           }
         };
         setMessages(prev => {
-          if (prev.some(m => m.metadata?.action === 'review_submitted' && m.metadata?.comment === createdReview.comment)) {
+          if (prev.some(m => m.orderId === selectedOrder.id && m.metadata?.action === 'review_submitted')) {
             return prev;
           }
           return [...prev, sysMsg];

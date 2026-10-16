@@ -4551,7 +4551,8 @@ const WORKSTREAM_ALLOWED_EXTENSIONS = new Set([
   '.html', '.htm', '.js', '.jsx', '.ts', '.tsx', '.css', '.scss',
   '.py', '.java', '.cpp', '.c', '.cs', '.php', '.rb', '.go', '.rs', '.sql', '.sh', '.xml', '.vue', '.svelte', '.yaml', '.yml'
 ]);
-const WORKSTREAM_INLINE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.svg', '.html', '.txt']);
+// .html is deliberately NOT inline: it would run uploaded scripts on the app origin. It is still fully downloadable.
+const WORKSTREAM_INLINE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.svg', '.txt']);
 
 // Upload ownership index: filename -> who uploaded it and when. Persisted so access rules and
 // abandoned-upload cleanup survive restarts.
@@ -4623,15 +4624,19 @@ function validateMessageFileInfo(fileInfo: any, sender: any):
 function validateStoredWorkstreamFiles(raw: any[], submitter?: any): { ok: true; files: Array<{ name: string; size: string; url: string }> } | { ok: false; error: string } {
   const out: Array<{ name: string; size: string; url: string }> = [];
   for (const f of raw) {
-    if (f?.url === '#' || !f?.url || String(f.url).trim() === '#') {
-      return { ok: false, error: 'Placeholder file URL "#" is not permitted as a file deliverable.' };
-    }
     const filename = workstreamFilenameFromUrl(f?.url);
     if (!filename) {
+      // Non-uploaded deliverable "links" are user-provided content: working, broken or arbitrary URLs and free text
+      // (including text such as "javascript:..." or "data:...") are stored as typed and never verified.
+      // Safety is enforced where the value is rendered/opened in the browser (src/utils/safeFileLink.ts), not here.
+      if (typeof f?.url !== 'string') {
+        return { ok: false, error: 'Invalid deliverable link.' };
+      }
+      const extUrl = f.url.trim();
       out.push({
         name: typeof f?.name === 'string' && f.name.trim() ? f.name.trim().slice(0, 200) : 'External Deliverable',
         size: typeof f?.size === 'string' ? f.size : '1.0 MB',
-        url: typeof f?.url === 'string' && f.url.trim() ? f.url.trim() : '#'
+        url: extUrl
       });
       continue;
     }
@@ -4890,6 +4895,10 @@ app.get('/api/workstream/files/:filename', requireAuth, (req, res) => {
     return res.download(filePath, originalName);
   }
 
+  // Inline SVG can carry <script>; sandbox it so it renders as an image only.
+  if (ext === '.svg') {
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox");
+  }
   res.sendFile(filePath);
 });
 

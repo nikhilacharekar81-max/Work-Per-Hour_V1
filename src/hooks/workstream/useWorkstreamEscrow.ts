@@ -74,7 +74,8 @@ export function useWorkstreamEscrow({
             amount: selectedOrder.amount
           }
         };
-        setMessages(prev => [...prev, sysMsg]);
+        // The server also broadcasts this event; skip if it already arrived (realtime merges the reverse case).
+        setMessages(prev => prev.some(m => m.orderId === selectedOrder.id && m.type === 'system' && m.metadata?.action === 'escrow_released') ? prev : [...prev, sysMsg]);
       }
 
       setIsReleasingEscrow(false);

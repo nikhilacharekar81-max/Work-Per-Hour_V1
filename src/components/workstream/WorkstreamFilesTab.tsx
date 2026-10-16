@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { FileText, Download, PlusCircle, FileCode, Image, FileArchive, ArrowUpRight, FolderOpen } from 'lucide-react';
 import { SharedFileItem } from './types';
 import { uploadWorkstreamFile } from '../../utils/workstreamUpload';
+import { classifyFileUrl, openWebLink } from '../../utils/safeFileLink';
 
 interface WorkstreamFilesTabProps {
   files: SharedFileItem[];
@@ -50,6 +51,9 @@ export const WorkstreamFilesTab: React.FC<WorkstreamFilesTabProps> = ({
       return;
     }
     if (!file.url || file.url === '#') return;
+    const link0 = classifyFileUrl(file.url);
+    if (link0.kind === 'web') { openWebLink(link0.url); return; }
+    if (link0.kind === 'text') { alert(`${file.name || 'Deliverable'}:\n\n${link0.url}`); return; }
     const downloadUrl = file.url.includes('?') ? `${file.url}&download=1` : `${file.url}?download=1`;
     const link = document.createElement('a');
     link.href = downloadUrl;
