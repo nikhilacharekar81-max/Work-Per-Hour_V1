@@ -255,7 +255,15 @@ async function run() {
   assert.strictEqual((await api('/api/reviews', { method: 'POST', token: buyer, body: { orderId: ORDER, targetUserId: 'user_5', rating: 4, comment: 'again' } })).status, 409);
   const profileReviews = await api('/api/users/user_5/reviews');
   assert.ok(profileReviews.json.some((r: any) => r.orderId === ORDER && r.comment === 'Solid work'), 'review visible on seller profile');
-  ok('review: validated, one per order, visible on seller profile');
+
+  // Verify review privacy: unauthorized dumping is blocked, normal marketplace reviews remain visible
+  const allReviewsRes = await api('/api/reviews');
+  assert.strictEqual(allReviewsRes.status, 200);
+  assert.ok(Array.isArray(allReviewsRes.json), 'reviews list returned as array');
+  assert.ok(allReviewsRes.json.every((r: any) => !r.isCancelledOrder && r.moderationStatus !== 'hidden'), 'unauthorized dump cannot access cancelled/hidden reviews');
+  assert.ok(allReviewsRes.json.some((r: any) => r.orderId === ORDER), 'completed public review is visible');
+
+  ok('review: validated, one per order, visible on seller profile, protected from unauthorized dumping');
 
   console.log(`\n🎉 ${passed} Workstream security/lifecycle checks passed`);
 }

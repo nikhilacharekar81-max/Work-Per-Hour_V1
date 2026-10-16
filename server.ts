@@ -4204,10 +4204,55 @@ app.delete('/api/admin/categories/:id/subcategories/:subId', (req, res) => {
 
   res.json(categories);
 });
-app.get('/api/reviews', (req, res) => res.json(reviews));
+function isReviewPublic(r: Review): boolean {
+  // Reviews on cancelled orders are private dispute/cancellation records between participants and staff
+  if (r.isCancelledOrder) return false;
+  // Non-approved or hidden moderation status
+  if ((r as any).moderationStatus && (r as any).moderationStatus !== 'approved') return false;
+  return true;
+}
+
+function sanitizePublicReview(r: Review): Review {
+  const { moderationReason, moderationNotes, ...publicRev } = r as any;
+  return publicRev;
+}
+
+app.get('/api/reviews', (req, res) => {
+  const authUserId = resolveAuthenticatedUserId(req);
+  const caller = authUserId ? users.find(u => u.id === authUserId) : null;
+  const isAdmin = caller?.role === 'admin' || caller?.role === 'super_admin' || caller?.role === 'support';
+
+  if (isAdmin) {
+    return res.json(reviews);
+  }
+
+  const visibleReviews = reviews.filter(r => {
+    // Participants see their own reviews (even if cancelled or pending moderation, unless hidden by staff)
+    if (authUserId && (r.reviewerId === authUserId || r.targetUserId === authUserId)) {
+      return (r as any).moderationStatus !== 'hidden';
+    }
+    // General marketplace users only see approved public reviews
+    return isReviewPublic(r);
+  }).map(sanitizePublicReview);
+
+  res.json(visibleReviews);
+});
 
 app.get('/api/users/:userId/reviews', (req, res) => {
-  const userReviews = reviews.filter(r => r.targetUserId === req.params.userId);
+  const targetUserId = req.params.userId;
+  const authUserId = resolveAuthenticatedUserId(req);
+  const caller = authUserId ? users.find(u => u.id === authUserId) : null;
+  const isAdmin = caller?.role === 'admin' || caller?.role === 'super_admin' || caller?.role === 'support';
+
+  const userReviews = reviews.filter(r => {
+    if (r.targetUserId !== targetUserId) return false;
+    if (isAdmin) return true;
+    if (authUserId && (r.reviewerId === authUserId || r.targetUserId === authUserId)) {
+      return (r as any).moderationStatus !== 'hidden';
+    }
+    return isReviewPublic(r);
+  }).map(sanitizePublicReview);
+
   res.json(userReviews);
 });
 
