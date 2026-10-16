@@ -478,14 +478,44 @@ function sanitizeAndCreateMessage(
   }
 
   const metadata: any = {};
-  if (body.metadata && typeof body.metadata === 'object') {
+  if (body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata)) {
     Object.assign(metadata, body.metadata);
   }
-  // Offer cards (proposal / invoice / deposit) are created only by the server from real offer records.
+
+  // 1. Offer cards (proposal / invoice / deposit) are created only by the server from real offer records.
   // A browser must never be able to forge one through a plain message.
   delete metadata.offerId;
   delete metadata.offerKind;
-  if (typeof metadata.action === 'string' && /^offer_/i.test(metadata.action)) delete metadata.action;
+
+  // 2. Prevent browser-supplied metadata from forging trusted system, platform, payment, or lifecycle events.
+  // Normal buyer/seller chat can include benign UI metadata (e.g. clientMessageId, requirementText),
+  // but cannot spoof platform-level lifecycle, payment, escrow, delivery, dispute, or administrative events.
+  if (!isSystemOrStaff) {
+    const FORBIDDEN_METADATA_KEYS = [
+      'disputeId', 'revisionId', 'reviewId', 'ticketId', 'payoutId', 'refundId', 'transactionId',
+      'deliveryVersion', 'version', 'amount', 'refundAmount', 'feeBreakdown',
+      'system', 'isSystem', 'official', 'verified', 'trusted', 'isAdmin', 'isStaff',
+      'role', 'senderRole', 'status', 'orderStatus', 'paymentStatus', 'escrowStatus'
+    ];
+    for (const key of FORBIDDEN_METADATA_KEYS) {
+      delete metadata[key];
+    }
+
+    if (typeof metadata.action === 'string') {
+      const action = metadata.action.trim().toLowerCase();
+      const isReservedAction =
+        /^(offer_|escrow_|deliverable_|delivery_|revision_|dispute_|review_|order_|payment_|payout_|refund_|wallet_|transaction_|deposit_|system_|admin_|staff_|moderation_|audit_|project_proposal)/i.test(action) ||
+        ['auto_accept', 'order_auto_accepted', 'release_escrow', 'escrow_release'].includes(action);
+
+      if (isReservedAction) {
+        delete metadata.action;
+      }
+    }
+  } else {
+    if (typeof metadata.action === 'string' && /^offer_/i.test(metadata.action)) {
+      delete metadata.action;
+    }
+  }
 
   if (body.clientMessageId) {
     metadata.clientMessageId = String(body.clientMessageId);

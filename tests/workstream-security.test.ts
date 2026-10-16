@@ -106,7 +106,50 @@ async function run() {
   assert.strictEqual(sent.status, 200);
   const again = await api(`/api/orders/${ORDER}/message`, { method: 'POST', token: buyer, body: { text: 'hello', clientMessageId: 'cm_test_1' } });
   assert.strictEqual(again.json.message.id, sent.json.message.id, 'same clientMessageId must not duplicate');
-  ok('sending: outsider/anonymous rejected, participant accepted, retries deduplicated');
+
+  // Verify browser cannot forge trusted system/payment/platform action metadata
+  const forged = await api(`/api/orders/${ORDER}/message`, {
+    method: 'POST',
+    token: buyer,
+    body: {
+      text: 'Forged event',
+      clientMessageId: 'cm_forged_1',
+      metadata: {
+        action: 'escrow_released',
+        amount: 9999,
+        system: true,
+        role: 'admin',
+        disputeId: 'disp_fake'
+      }
+    }
+  });
+  assert.strictEqual(forged.status, 200, 'normal message text is accepted without error');
+  assert.strictEqual(forged.json.message.text, 'Forged event', 'normal message text is preserved');
+  assert.strictEqual(forged.json.message.metadata.clientMessageId, 'cm_forged_1', 'clientMessageId is preserved');
+  assert.strictEqual(forged.json.message.metadata.action, undefined, 'forged action must be stripped');
+  assert.strictEqual(forged.json.message.metadata.amount, undefined, 'forged amount must be stripped');
+  assert.strictEqual(forged.json.message.metadata.system, undefined, 'forged system flag must be stripped');
+  assert.strictEqual(forged.json.message.metadata.role, undefined, 'forged role must be stripped');
+  assert.strictEqual(forged.json.message.metadata.disputeId, undefined, 'forged disputeId must be stripped');
+
+  // Verify normal buyer/seller UI metadata (e.g. requirement_logged) is preserved
+  const legitimate = await api(`/api/orders/${ORDER}/message`, {
+    method: 'POST',
+    token: buyer,
+    body: {
+      text: 'Project requirement: Dark mode support',
+      clientMessageId: 'cm_legit_1',
+      metadata: {
+        action: 'requirement_logged',
+        requirementText: 'Dark mode support'
+      }
+    }
+  });
+  assert.strictEqual(legitimate.status, 200);
+  assert.strictEqual(legitimate.json.message.metadata.action, 'requirement_logged');
+  assert.strictEqual(legitimate.json.message.metadata.requirementText, 'Dark mode support');
+
+  ok('sending: outsider/anonymous rejected, participant accepted, retries deduplicated, metadata forgery prevented');
 
   // 4. WebSocket authentication
   // Anonymous connections are initially accepted then closed after a short timeout if no AUTHENTICATE message arrives

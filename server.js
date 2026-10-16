@@ -16155,6 +16155,17 @@ var require_utils = __commonJS({
     var setMaxIndex = function setMaxIndex2(obj, maxIndex) {
       overflowChannel.set(obj, maxIndex);
     };
+    var conflictChannel = getSideChannel();
+    var markConflict = function markConflict2(obj, maxIndex) {
+      conflictChannel.set(obj, maxIndex);
+      return obj;
+    };
+    var isConflict = function isConflict2(obj) {
+      return conflictChannel.has(obj);
+    };
+    var getConflictIndex = function getConflictIndex2(obj) {
+      return conflictChannel.get(obj);
+    };
     var hexTable = (function() {
       var array = [];
       for (var i = 0; i < 256; ++i) {
@@ -16198,6 +16209,27 @@ var require_utils = __commonJS({
         obj[key] = value;
       }
     };
+    var maxNumericIndex = function maxNumericIndex2(obj, min) {
+      var max = min;
+      var keys = Object.keys(obj);
+      for (var i = 0; i < keys.length; ++i) {
+        var num = parseInt(keys[i], 10);
+        if (String(num) === keys[i] && num > max) {
+          max = num;
+        }
+      }
+      return max;
+    };
+    var limitedPair = function limitedPair2(first, second, options) {
+      var pair = [first, second];
+      if (options && typeof options.arrayLimit === "number" && pair.length > options.arrayLimit) {
+        if (options.throwOnLimitExceeded) {
+          throw new RangeError("Array limit exceeded. Only " + options.arrayLimit + " element" + (options.arrayLimit === 1 ? "" : "s") + " allowed in an array.");
+        }
+        return markOverflow(arrayToObject(pair, options), 1);
+      }
+      return pair;
+    };
     var merge = function merge2(target, source, options) {
       if (!source) {
         return target;
@@ -16217,13 +16249,21 @@ var require_utils = __commonJS({
             var newIndex = getMaxIndex(target) + 1;
             target[newIndex] = source;
             setMaxIndex(target, newIndex);
+          } else if (options && options.strictMerge && isConflict(target)) {
+            var nextConflict = getConflictIndex(target) + 1;
+            if (options.throwOnLimitExceeded && typeof options.arrayLimit === "number" && nextConflict >= options.arrayLimit) {
+              throw new RangeError("Array limit exceeded. Only " + options.arrayLimit + " element" + (options.arrayLimit === 1 ? "" : "s") + " allowed in an array.");
+            }
+            target[nextConflict] = source;
+            markConflict(target, nextConflict);
           } else if (options && options.strictMerge) {
-            return [target, source];
+            var conflict = limitedPair(target, source, options);
+            return isArray(conflict) ? markConflict(conflict, 1) : conflict;
           } else if (options && (options.plainObjects || options.allowPrototypes) || !has.call(Object.prototype, source)) {
             target[source] = true;
           }
         } else {
-          return [target, source];
+          return limitedPair(target, source, options);
         }
         return target;
       }
@@ -16249,6 +16289,9 @@ var require_utils = __commonJS({
       var mergeTarget = target;
       if (isArray(target) && !isArray(source)) {
         mergeTarget = arrayToObject(target, options);
+        if (isConflict(target)) {
+          markConflict(mergeTarget, target.length - 1);
+        }
       }
       if (isArray(target) && isArray(source)) {
         source.forEach(function(item, i) {
@@ -16279,12 +16322,18 @@ var require_utils = __commonJS({
           setProperty(acc, key, value);
         }
         if (isOverflow(source) && !isOverflow(acc)) {
-          markOverflow(acc, getMaxIndex(source));
+          markOverflow(acc, maxNumericIndex(acc, getMaxIndex(source)));
         }
         if (isOverflow(acc)) {
           var keyNum = parseInt(key, 10);
           if (String(keyNum) === key && keyNum >= 0 && keyNum > getMaxIndex(acc)) {
             setMaxIndex(acc, keyNum);
+          }
+        }
+        if (isConflict(acc)) {
+          var conflictKey = parseInt(key, 10);
+          if (String(conflictKey) === key && conflictKey > getConflictIndex(acc)) {
+            markConflict(acc, conflictKey);
           }
         }
         return acc;
@@ -16297,6 +16346,9 @@ var require_utils = __commonJS({
       }, target);
     };
     var decode = function(str, defaultDecoder, charset) {
+      if (typeof str === "string" && str.indexOf("%") === -1) {
+        return str.indexOf("+") === -1 ? str : str.replace(/\+/g, " ");
+      }
       var strWithoutPlus = str.replace(/\+/g, " ");
       if (charset === "iso-8859-1") {
         return strWithoutPlus.replace(/%[0-9a-f]{2}/gi, unescape);
@@ -16307,6 +16359,52 @@ var require_utils = __commonJS({
         return strWithoutPlus;
       }
     };
+    var hasToPrimitive = typeof Symbol === "function" && typeof Symbol.toPrimitive === "symbol";
+    var arrayJoin = Array.prototype.join;
+    var arrayToString = Array.prototype.toString;
+    var objectToString = Object.prototype.toString;
+    var toCoercible = function toCoercible2(value, joining) {
+      if (!value || typeof value !== "object" && typeof value !== "function") {
+        return value;
+      }
+      if (hasToPrimitive && value[Symbol.toPrimitive] != null) {
+        return value;
+      }
+      if (isArray(value) && value.toString === arrayToString && value.join === arrayJoin) {
+        var ancestors = joining || getSideChannel();
+        if (ancestors.has(value)) {
+          return "";
+        }
+        ancestors.set(value, true);
+        var copy;
+        for (var i = 0; i < value.length; i += 1) {
+          var item = value[i];
+          var coerced = toCoercible2(item, ancestors);
+          if (!copy && coerced !== item) {
+            copy = [];
+            for (var j = 0; j < i; j += 1) {
+              copy[j] = value[j];
+            }
+          }
+          if (copy) {
+            copy[i] = coerced;
+          }
+        }
+        ancestors["delete"](value);
+        return copy || value;
+      }
+      if (typeof value.toString === "function") {
+        return value;
+      }
+      var valueOf = value.valueOf;
+      if (typeof valueOf === "function") {
+        var primitive = valueOf.call(value);
+        if (!primitive || typeof primitive !== "object" && typeof primitive !== "function") {
+          return String(primitive);
+        }
+      }
+      return objectToString.call(value);
+    };
     var limit = 1024;
     var encode = function encode2(str, defaultEncoder, charset, kind, format) {
       if (str.length === 0) {
@@ -16316,12 +16414,12 @@ var require_utils = __commonJS({
       if (typeof str === "symbol") {
         string = Symbol.prototype.toString.call(str);
       } else if (typeof str !== "string") {
-        string = String(str);
+        string = String(toCoercible(str));
       }
       if (charset === "iso-8859-1") {
         return escape(string).replace(/%u[0-9a-f]{4}/gi, function($0) {
           return "%26%23" + parseInt($0.slice(2), 16) + "%3B";
-        });
+        }).replace(/\+/g, "%2B");
       }
       var out = "";
       for (var j = 0; j < string.length; j += limit) {
@@ -16433,7 +16531,8 @@ var require_utils = __commonJS({
       isRegExp,
       markOverflow,
       maybeMap,
-      merge
+      merge,
+      toCoercible
     };
   }
 });
@@ -16548,17 +16647,17 @@ var require_stringify = __commonJS({
       if (generateArrayPrefix === "comma" && isArray(obj)) {
         if (encodeValuesOnly && encoder) {
           obj = utils.maybeMap(obj, function(v) {
-            return v == null ? v : encoder(v);
+            return v == null ? v : encoder(v, defaults.encoder, charset, "value", format);
           });
         }
-        objKeys = [{ value: obj.length > 0 ? obj.join(",") || null : void 0 }];
+        objKeys = [{ value: obj.length > 0 ? utils.toCoercible(obj).join(",") || null : void 0 }];
       } else if (isArray(filter)) {
         objKeys = filter;
       } else {
         var keys = Object.keys(obj);
         objKeys = sort ? keys.sort(sort) : keys;
       }
-      var encodedPrefix = encodeDotInKeys ? String(prefix).replace(/\./g, "%2E") : String(prefix);
+      var encodedPrefix = String(prefix);
       var adjustedPrefix = commaRoundTrip && isArray(obj) && obj.length === 1 ? encodedPrefix + "[]" : encodedPrefix;
       if (allowEmptyArrays && isArray(obj) && obj.length === 0 && Object.keys(obj).length === 0) {
         return adjustedPrefix + "[]";
@@ -16629,7 +16728,7 @@ var require_stringify = __commonJS({
         filter = opts.filter;
       }
       var arrayFormat;
-      if (opts.arrayFormat in arrayPrefixGenerators) {
+      if (has.call(arrayPrefixGenerators, opts.arrayFormat)) {
         arrayFormat = opts.arrayFormat;
       } else if ("indices" in opts) {
         arrayFormat = opts.indices ? "indices" : "repeat";
@@ -16739,9 +16838,53 @@ var require_stringify = __commonJS({
 var require_parse = __commonJS({
   "node_modules/qs/lib/parse.js"(exports, module) {
     "use strict";
+    var getSideChannel = require_side_channel();
     var utils = require_utils();
     var has = Object.prototype.hasOwnProperty;
     var isArray = Array.isArray;
+    var getPrototypeOf = Object.getPrototypeOf;
+    var isPlainContainer = function isPlainContainer2(value) {
+      if (!value || typeof value !== "object") {
+        return false;
+      }
+      if (isArray(value)) {
+        return true;
+      }
+      var proto = getPrototypeOf(value);
+      return proto === Object.prototype || proto === null;
+    };
+    var emptyCopyOf = function emptyCopyOf2(value) {
+      if (isArray(value)) {
+        var arr = [];
+        arr.length = value.length;
+        return arr;
+      }
+      return getPrototypeOf(value) === null ? { __proto__: null } : {};
+    };
+    var copyInput = function copyInput2(input) {
+      var copies = getSideChannel();
+      var result = {};
+      var queue = [{ source: input, target: result }];
+      for (var i = 0; i < queue.length; ++i) {
+        var source = queue[i].source;
+        var target = queue[i].target;
+        var keys = Object.keys(source);
+        for (var j = 0; j < keys.length; ++j) {
+          var value = source[keys[j]];
+          if (isPlainContainer(value)) {
+            if (!copies.has(value)) {
+              var copy = emptyCopyOf(value);
+              copies.set(value, copy);
+              queue[queue.length] = { source: value, target: copy };
+            }
+            target[keys[j]] = copies.get(value);
+          } else {
+            target[keys[j]] = value;
+          }
+        }
+      }
+      return result;
+    };
     var defaults = {
       allowDots: false,
       allowEmptyArrays: false,
@@ -16828,6 +16971,7 @@ var require_parse = __commonJS({
         var part = parts[i];
         var bracketEqualsPos = part.indexOf("]=");
         var pos = bracketEqualsPos === -1 ? part.indexOf("=") : bracketEqualsPos + 1;
+        var isEmptyBracketKey = pos > 1 && part.slice(pos - 2, pos) === "[]";
         var key;
         var val;
         if (pos === -1) {
@@ -16851,7 +16995,7 @@ var require_parse = __commonJS({
         if (val && options.interpretNumericEntities && charset === "iso-8859-1") {
           val = interpretNumericEntities(String(val));
         }
-        if (part.indexOf("[]=") > -1) {
+        if (isEmptyBracketKey) {
           val = isArray(val) ? [val] : val;
         }
         if (options.comma && isArray(val) && val.length > options.arrayLimit) {
@@ -16859,7 +17003,7 @@ var require_parse = __commonJS({
         }
         if (key !== null) {
           var existing = has.call(obj, key);
-          if (existing && (options.duplicates === "combine" || part.indexOf("[]=") > -1)) {
+          if (existing && (options.duplicates === "combine" || isEmptyBracketKey)) {
             obj[key] = utils.combine(
               obj[key],
               val,
@@ -16920,8 +17064,35 @@ var require_parse = __commonJS({
       }
       return leaf;
     };
+    var topLevelDotsToBrackets = function topLevelDotsToBrackets2(key) {
+      var result = "";
+      var depth = 0;
+      for (var i = 0; i < key.length; i += 1) {
+        var cu = key.charCodeAt(i);
+        if (cu === 91) {
+          depth += 1;
+          result += "[";
+        } else if (cu === 93) {
+          if (depth > 0) {
+            depth -= 1;
+          }
+          result += "]";
+        } else if (cu === 46 && depth === 0 && i + 1 < key.length && key.charCodeAt(i + 1) !== 46 && key.charCodeAt(i + 1) !== 91) {
+          var start = i + 1;
+          var j = start;
+          while (j < key.length && key.charCodeAt(j) !== 46 && key.charCodeAt(j) !== 91) {
+            j += 1;
+          }
+          result += "[" + key.slice(start, j) + "]";
+          i = j - 1;
+        } else {
+          result += key.charAt(i);
+        }
+      }
+      return result;
+    };
     var splitKeyIntoSegments = function splitKeyIntoSegments2(originalKey, options) {
-      var key = options.allowDots ? originalKey.replace(/\.([^.[]+)/g, "[$1]") : originalKey;
+      var key = options.allowDots ? topLevelDotsToBrackets(originalKey) : originalKey;
       if (options.depth <= 0) {
         if (!options.plainObjects && has.call(Object.prototype, key)) {
           if (!options.allowPrototypes) {
@@ -17047,7 +17218,7 @@ var require_parse = __commonJS({
       if (str === "" || str === null || typeof str === "undefined") {
         return options.plainObjects ? { __proto__: null } : {};
       }
-      var tempObj = typeof str === "string" ? parseValues(str, options) : str;
+      var tempObj = typeof str === "string" ? parseValues(str, options) : copyInput(str);
       var obj = options.plainObjects ? { __proto__: null } : {};
       var keys = Object.keys(tempObj);
       for (var i = 0; i < keys.length; ++i) {
@@ -31634,12 +31805,54 @@ function sanitizeAndCreateMessage(sender, order, body, fileCheck) {
     throw new Error("Message is too long.");
   }
   const metadata = {};
-  if (body.metadata && typeof body.metadata === "object") {
+  if (body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)) {
     Object.assign(metadata, body.metadata);
   }
   delete metadata.offerId;
   delete metadata.offerKind;
-  if (typeof metadata.action === "string" && /^offer_/i.test(metadata.action)) delete metadata.action;
+  if (!isSystemOrStaff) {
+    const FORBIDDEN_METADATA_KEYS = [
+      "disputeId",
+      "revisionId",
+      "reviewId",
+      "ticketId",
+      "payoutId",
+      "refundId",
+      "transactionId",
+      "deliveryVersion",
+      "version",
+      "amount",
+      "refundAmount",
+      "feeBreakdown",
+      "system",
+      "isSystem",
+      "official",
+      "verified",
+      "trusted",
+      "isAdmin",
+      "isStaff",
+      "role",
+      "senderRole",
+      "status",
+      "orderStatus",
+      "paymentStatus",
+      "escrowStatus"
+    ];
+    for (const key of FORBIDDEN_METADATA_KEYS) {
+      delete metadata[key];
+    }
+    if (typeof metadata.action === "string") {
+      const action = metadata.action.trim().toLowerCase();
+      const isReservedAction = /^(offer_|escrow_|deliverable_|delivery_|revision_|dispute_|review_|order_|payment_|payout_|refund_|wallet_|transaction_|deposit_|system_|admin_|staff_|moderation_|audit_|project_proposal)/i.test(action) || ["auto_accept", "order_auto_accepted", "release_escrow", "escrow_release"].includes(action);
+      if (isReservedAction) {
+        delete metadata.action;
+      }
+    }
+  } else {
+    if (typeof metadata.action === "string" && /^offer_/i.test(metadata.action)) {
+      delete metadata.action;
+    }
+  }
   if (body.clientMessageId) {
     metadata.clientMessageId = String(body.clientMessageId);
   }
@@ -32489,7 +32702,7 @@ function loadInitialOrdersAndMessages() {
 }
 loadInitialOrdersAndMessages();
 function enrichOrderWithServiceInfo(o, isAdmin = false) {
-  const gig = (o.gigId ? gigs.find((g) => g.id === o.gigId) : void 0) || gigs.find((g) => g.freelancerId === o.sellerId) || gigs.find((g) => g.title.toLowerCase() === o.title.toLowerCase());
+  const gig = (o.gigId ? gigs.find((g) => g.id === o.gigId) : void 0) || gigs.find((g) => g.title.toLowerCase() === o.title.toLowerCase());
   const project = (o.projectId ? projects.find((p) => p.id === o.projectId) : void 0) || projects.find((p) => p.title.toLowerCase() === o.title.toLowerCase());
   const seller = users.find((u) => u.id === o.sellerId);
   const buyer = users.find((u) => u.id === o.buyerId);
@@ -32949,30 +33162,27 @@ app.get("/api/my/projects", requireAuth, (req, res) => {
 app.get("/api/proposals", (req, res) => {
   const authUserId = resolveAuthenticatedUserId(req);
   if (!authUserId) {
-    return res.json(proposals);
+    return res.json([]);
   }
   const caller = users.find((u) => u.id === authUserId);
   const isAdmin = caller?.role === "admin" || caller?.role === "super_admin" || caller?.role === "support";
-  const userProposals = proposals.filter((p) => isAdmin || p.freelancerId === authUserId);
+  const userProposals = proposals.filter((p) => isAdmin || p.freelancerId === authUserId || projects.some((pr) => pr.id === p.projectId && pr.buyerId === authUserId));
   res.json(userProposals);
 });
-app.get("/api/orders", (req, res) => {
+app.get("/api/orders", requireAuth, (req, res) => {
   const authUserId = resolveAuthenticatedUserId(req);
-  if (!authUserId) {
-    return res.json(orders.map((o) => enrichOrderWithServiceInfo(o, true)));
-  }
   const caller = users.find((u) => u.id === authUserId);
   const isAdmin = caller?.role === "admin" || caller?.role === "super_admin" || caller?.role === "support";
   const userOrders = orders.filter((o) => isAdmin || o.buyerId === authUserId || o.sellerId === authUserId);
   res.json(userOrders.map((o) => enrichOrderWithServiceInfo(o, isAdmin)));
 });
-app.get("/api/orders/:id", (req, res) => {
+app.get("/api/orders/:id", requireAuth, (req, res) => {
   const order = orderIndex.get(req.params.id);
   if (!order) return res.status(404).json({ error: "Order not found" });
   const authUserId = resolveAuthenticatedUserId(req);
-  const caller = authUserId ? users.find((u) => u.id === authUserId) : null;
-  const isAdmin = !authUserId || caller?.role === "admin" || caller?.role === "super_admin";
-  if (authUserId && !isAdmin && order.buyerId !== authUserId && order.sellerId !== authUserId) {
+  const caller = users.find((u) => u.id === authUserId);
+  const isAdmin = caller?.role === "admin" || caller?.role === "super_admin";
+  if (!isAdmin && order.buyerId !== authUserId && order.sellerId !== authUserId) {
     return res.status(403).json({ error: "Forbidden: Access to this order is restricted to participants." });
   }
   const enriched = enrichOrderWithServiceInfo(order, isAdmin);
@@ -35410,6 +35620,53 @@ app.patch("/api/gigs/:id/feature", (req, res) => {
   });
   res.json(g);
 });
+function openProjectChat(project, freelancer, proposal) {
+  try {
+    if (!project || !["open", "published"].includes(project.status)) return void 0;
+    const owner = users.find((u) => u.id === project.buyerId);
+    if (!owner || owner.status !== "active" || owner.id === freelancer.id) return void 0;
+    let order = orders.find((o) => o.projectId === project.id && o.buyerId === owner.id && o.sellerId === freelancer.id && !["completed", "cancelled"].includes(o.status));
+    if (!order) {
+      const created = {
+        id: "ord_" + randomUUID2().slice(0, 12),
+        title: `Inquiry: ${project.title}`,
+        buyerId: owner.id,
+        sellerId: freelancer.id,
+        amount: 0,
+        status: "in_progress",
+        createdAt: (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+        dueDate: new Date(Date.now() + 7 * 864e5).toISOString().split("T")[0],
+        projectId: project.id
+      };
+      order = enrichOrderWithServiceInfo(created);
+      recordOrder(order);
+      saveOrdersToDisk();
+    }
+    const sym = siteSettings.getFlattenedSettings().currencySymbol || "$";
+    const days = proposal.deliveryDays;
+    const text = `Proposal for "${project.title}"
+Bid: ${sym}${proposal.bidAmount} \xB7 Delivery: ${days} day${days === 1 ? "" : "s"}
+
+${proposal.coverLetter}`.slice(0, 5e3);
+    const msg = {
+      id: "msg_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+      orderId: order.id,
+      senderId: freelancer.id,
+      senderName: freelancer.name,
+      text,
+      timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+      type: "message",
+      metadata: { action: "project_proposal" }
+    };
+    recordMessage(msg);
+    saveMessagesToDisk();
+    broadcastMessage(msg, order.id);
+    return order.id;
+  } catch (err) {
+    console.error("Failed to open project chat for proposal:", err);
+    return void 0;
+  }
+}
 app.post("/api/proposals", requireAuth, (req, res) => {
   const authUserId = req.authenticatedUserId;
   const caller = req.authenticatedUser || users.find((u) => u.id === authUserId);
@@ -35443,7 +35700,8 @@ app.post("/api/proposals", requireAuth, (req, res) => {
   proposals.unshift(newProp);
   const proj = projects.find((p) => p.id === req.body.projectId);
   if (proj) proj.proposalsCount += 1;
-  res.json(newProp);
+  const workstreamOrderId = openProjectChat(proj, caller, newProp);
+  res.json({ ...newProp, workstreamOrderId });
 });
 app.post("/api/orders", requireAuth, rateLimit(30, 6e4), (req, res) => {
   try {
@@ -35464,7 +35722,7 @@ app.post("/api/orders", requireAuth, rateLimit(30, 6e4), (req, res) => {
     const activeSettings = siteSettings.getSettings();
     const maxActiveOrders = activeSettings.marketplace.maxActiveOrdersPerFreelancer;
     if (maxActiveOrders > 0) {
-      const activeSellerOrders = orders.filter((o) => o.sellerId === sellerId && ["funded_in_escrow", "in_progress", "delivered", "revision"].includes(o.status));
+      const activeSellerOrders = orders.filter((o) => o.sellerId === sellerId && Number(o.amount) > 0 && ["funded_in_escrow", "in_progress", "delivered", "revision"].includes(o.status));
       if (activeSellerOrders.length >= maxActiveOrders) {
         return res.status(400).json({
           error: `This seller has reached the maximum allowed active orders (${activeSellerOrders.length}/${maxActiveOrders}). Please try again later.`
@@ -35480,9 +35738,10 @@ app.post("/api/orders", requireAuth, rateLimit(30, 6e4), (req, res) => {
       if (priced.gig.freelancerId !== sellerId) return res.status(400).json({ error: "This gig does not belong to the selected seller." });
       rawAmount = priced.gigPrice;
     }
+    const requirements = typeof req.body?.requirements === "string" ? escapeHtml(req.body.requirements.trim()).slice(0, 2e3) : "";
     let newOrd;
     if (isInquiry) {
-      newOrd = { id, title, buyerId, sellerId, amount: 0, status: "in_progress", createdAt: today, dueDate: req.body.dueDate || new Date(Date.now() + 7 * 864e5).toISOString().split("T")[0], gigId: req.body.gigId, projectId: req.body.projectId };
+      newOrd = { id, title, buyerId, sellerId, amount: 0, status: "in_progress", createdAt: today, dueDate: req.body.dueDate || new Date(Date.now() + 7 * 864e5).toISOString().split("T")[0], gigId: req.body.gigId, projectId: req.body.projectId, ...requirements ? { requirements } : {} };
     } else {
       financeLedger.fundEscrow({ orderId: id, orderTitle: title, amount: rawAmount, buyerId, sellerId, actor: `user:${buyerId}` });
       newOrd = {
@@ -35498,13 +35757,33 @@ app.post("/api/orders", requireAuth, rateLimit(30, 6e4), (req, res) => {
         escrowProtectionEndDate: new Date(Date.now() + DEFAULT_SITE_SETTINGS.commission.escrowProtectionDays * 864e5).toISOString().split("T")[0],
         gigId: req.body.gigId,
         projectId: req.body.projectId,
-        feeBreakdown: financeLedger.quoteOrder(rawAmount)
+        feeBreakdown: financeLedger.quoteOrder(rawAmount),
+        ...requirements ? { requirements } : {}
       };
       syncUserBalances();
     }
     const enriched = enrichOrderWithServiceInfo(newOrd);
     recordOrder(enriched);
     saveOrdersToDisk();
+    if (!isInquiry) {
+      const opening = [{
+        senderId: "system",
+        senderName: "Workstream",
+        type: "system",
+        text: `Order placed: ${title}. Payment is held in escrow until the work is approved.`
+      }];
+      if (requirements) opening.push({ senderId: buyer.id, senderName: buyer.name, type: "message", text: `Project requirements: ${requirements}` });
+      opening.forEach((m, i) => {
+        recordMessage({
+          id: "msg_" + Date.now() + "_" + i + Math.random().toString(36).slice(2, 6),
+          orderId: id,
+          ...m,
+          timestamp: new Date(Date.now() + i).toISOString(),
+          metadata: { action: i === 0 ? "order_created" : "requirements_logged" }
+        });
+      });
+      saveMessagesToDisk();
+    }
     res.status(201).json(enriched);
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message });
@@ -35547,7 +35826,7 @@ function postOfferMessage(order, offer, sender, text, action) {
     type: sender ? "message" : "system",
     metadata: { action, offerId: offer.id, offerKind: offer.kind }
   };
-  messages.push(msg);
+  recordMessage(msg);
   saveMessagesToDisk();
   broadcastMessage(msg, order.id);
 }
@@ -35678,7 +35957,7 @@ app.post("/api/offers/:id/:action(accept|decline|cancel)", requireAuth, rateLimi
         feeBreakdown: financeLedger.quoteOrder(offer.amount)
       };
       newOrder = enrichOrderWithServiceInfo(child);
-      orders.unshift(newOrder);
+      recordOrder(newOrder);
       offer.status = "paid";
       offer.fundedOrderId = childId;
     } else {
