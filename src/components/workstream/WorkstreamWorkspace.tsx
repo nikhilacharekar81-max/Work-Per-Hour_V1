@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   ChevronLeft, ShieldCheck, Clock, CheckCircle2, AlertCircle, 
   RotateCcw, Activity, FolderOpen, Send, Sparkles, MessageSquare, Video, Star 
@@ -85,6 +85,16 @@ export const WorkstreamWorkspace: React.FC<WorkstreamWorkspaceProps> = ({
   const canRaiseInvoice = isSeller && escrowFunded && order.status !== 'cancelled';
   const proposalHint = !isSeller ? 'Only the seller can send this' : 'Escrow is already funded. Use Raise Invoice for extra work.';
   const invoiceHint = !isSeller ? 'Only the seller can send this' : 'Invoices are for follow-on work once escrow is funded.';
+
+  // When an offer is accepted/paid the order changes (escrow funded, or a new invoice order appears).
+  // The buyer's click already refreshes, but the seller only sees the system message, so refresh on it too.
+  const lastMessage = messages.length ? messages[messages.length - 1] : undefined;
+  const handledOfferMsgRef = useRef<string>(lastMessageId);
+  useEffect(() => {
+    if (!lastMessage || lastMessage.id === handledOfferMsgRef.current) return;
+    handledOfferMsgRef.current = lastMessage.id;
+    if (lastMessage.metadata?.action === 'offer_accepted') onOrderChanged?.(null);
+  }, [lastMessage?.id]);
 
   const handleOfferAction = async (offerId: string, action: 'accept' | 'decline' | 'cancel') => {
     const result = await respond(offerId, action);

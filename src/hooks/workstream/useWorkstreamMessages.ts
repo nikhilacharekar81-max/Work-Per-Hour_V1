@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, Dispatch, SetStateAction } from 'react';
 import { Message } from '../../types';
 import { getAuthToken, clearAuthToken } from '../../utils/authToken';
 
@@ -6,8 +6,22 @@ import { getAuthToken, clearAuthToken } from '../../utils/authToken';
  * Hook responsible for managing workstream messages state, per-workstream cache isolation,
  * race-condition prevention during workstream switching, and message ordering.
  */
-export function useWorkstreamMessages() {
-  const [messages, setMessages] = useState<Message[]>([]);
+export interface UseWorkstreamMessagesOptions {
+  /** The app-level message store. When given, this hook reads and writes it instead of a private copy. */
+  messages?: Message[];
+  setMessages?: Dispatch<SetStateAction<Message[]>>;
+  /** Used as the sender of optimistic messages so they render on the sender's side immediately. */
+  currentUserId?: string;
+}
+
+export function useWorkstreamMessages(options: UseWorkstreamMessagesOptions = {}) {
+  // The workspace renders the app-level store, so fetch / send / events must write to that same store.
+  // (A private copy here meant fetched history and optimistic sends never reached the screen.)
+  const [ownMessages, setOwnMessages] = useState<Message[]>([]);
+  const messages = options.messages ?? ownMessages;
+  const setMessages = options.setMessages ?? setOwnMessages;
+  const currentUserIdRef = useRef<string | undefined>(options.currentUserId);
+  currentUserIdRef.current = options.currentUserId;
   const [newMessageText, setNewMessageText] = useState('');
   
   // Guard against out-of-order responses when user rapidly switches workstreams
@@ -75,7 +89,7 @@ export function useWorkstreamMessages() {
     const tempMessage: Message = {
       id: clientMessageId,
       orderId: activeOrderId,
-      senderId: 'current_user',
+      senderId: currentUserIdRef.current || 'current_user',
       senderName: 'You',
       text: text.trim(),
       timestamp: new Date().toISOString(),
@@ -133,7 +147,7 @@ export function useWorkstreamMessages() {
     const tempMessage: Message = {
       id: clientMessageId,
       orderId,
-      senderId: 'current_user',
+      senderId: currentUserIdRef.current || 'current_user',
       senderName: 'System',
       text,
       timestamp: new Date().toISOString(),

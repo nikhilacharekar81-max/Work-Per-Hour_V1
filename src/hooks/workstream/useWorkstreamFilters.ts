@@ -28,7 +28,7 @@ export function useWorkstreamFilters({
       // 16: Discussion should be distinct from general inbox/in_progress. 
       // Assuming 'discussion' means specifically active, in-progress work.
       if (workstreamTab === 'inbox' && !['funded_in_escrow', 'in_progress', 'delivered', 'revision'].includes(w.status)) return false;
-      if (workstreamTab === 'in_progress' && w.status !== 'in_progress') return false;
+      if (workstreamTab === 'in_progress' && !['in_progress', 'funded_in_escrow', 'revision'].includes(w.status)) return false;
       if (workstreamTab === 'delivered' && w.status !== 'delivered') return false;
       if (workstreamTab === 'completed' && w.status !== 'completed') return false;
       if (workstreamTab === 'starred' && !starredWorkstreams.includes(w.id)) return false;

@@ -1747,8 +1747,9 @@ function loadInitialOrdersAndMessages() {
 loadInitialOrdersAndMessages();
 
 function enrichOrderWithServiceInfo(o: Order, isAdmin: boolean = false) {
+  // Link a gig only when the order references it (or its title matches exactly). Guessing "the seller's first gig"
+  // gave proposal / custom workstreams the wrong thumbnail, title and service link.
   const gig = (o.gigId ? gigs.find(g => g.id === o.gigId) : undefined) ||
-              gigs.find(g => g.freelancerId === o.sellerId) ||
               gigs.find(g => g.title.toLowerCase() === o.title.toLowerCase());
   const project = (o.projectId ? projects.find(p => p.id === o.projectId) : undefined) ||
                   projects.find(p => p.title.toLowerCase() === o.title.toLowerCase());
@@ -5255,7 +5256,8 @@ app.post('/api/orders', requireAuth, rateLimit(30, 60_000), (req, res) => {
     const activeSettings = siteSettings.getSettings();
     const maxActiveOrders = activeSettings.marketplace.maxActiveOrdersPerFreelancer;
     if (maxActiveOrders > 0) {
-      const activeSellerOrders = orders.filter(o => o.sellerId === sellerId && ['funded_in_escrow', 'in_progress', 'delivered', 'revision'].includes(o.status));
+      // Inquiry chats (amount 0, no escrow) are conversations, not work, so they don't count toward the limit.
+      const activeSellerOrders = orders.filter(o => o.sellerId === sellerId && Number(o.amount) > 0 && ['funded_in_escrow', 'in_progress', 'delivered', 'revision'].includes(o.status));
       if (activeSellerOrders.length >= maxActiveOrders) {
         return res.status(400).json({
           error: `This seller has reached the maximum allowed active orders (${activeSellerOrders.length}/${maxActiveOrders}). Please try again later.`
@@ -5275,10 +5277,12 @@ app.post('/api/orders', requireAuth, rateLimit(30, 60_000), (req, res) => {
       rawAmount = priced.gigPrice;
     }
 
+    const requirements = typeof req.body?.requirements === 'string' ? escapeHtml(req.body.requirements.trim()).slice(0, 2000) : '';
+
     let newOrd: Order;
     if (isInquiry) {
       // Chat thread only: nothing is charged and no escrow exists
-      newOrd = { id, title, buyerId, sellerId, amount: 0, status: 'in_progress', createdAt: today, dueDate: req.body.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0], gigId: req.body.gigId, projectId: req.body.projectId };
+      newOrd = { id, title, buyerId, sellerId, amount: 0, status: 'in_progress', createdAt: today, dueDate: req.body.dueDate || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0], gigId: req.body.gigId, projectId: req.body.projectId, ...(requirements ? { requirements } : {}) };
     } else {
       // Debits the buyer wallet into escrow. Throws (and creates nothing) if the balance is too low.
       financeLedger.fundEscrow({ orderId: id, orderTitle: title, amount: rawAmount, buyerId, sellerId, actor: `user:${buyerId}` });
@@ -5288,13 +5292,30 @@ app.post('/api/orders', requireAuth, rateLimit(30, 60_000), (req, res) => {
         escrowProtectionStartDate: today,
         escrowProtectionEndDate: new Date(Date.now() + DEFAULT_SITE_SETTINGS.commission.escrowProtectionDays * 86400000).toISOString().split('T')[0],
         gigId: req.body.gigId, projectId: req.body.projectId,
-        feeBreakdown: financeLedger.quoteOrder(rawAmount)
+        feeBreakdown: financeLedger.quoteOrder(rawAmount),
+        ...(requirements ? { requirements } : {})
       };
       syncUserBalances();
     }
     const enriched = enrichOrderWithServiceInfo(newOrd);
     recordOrder(enriched);
     saveOrdersToDisk();
+    if (!isInquiry) {
+      // Open the workstream with a record of the purchase (and the brief, if one was given) so it is never an empty thread.
+      const opening: Array<{ senderId: string; senderName: string; text: string; type: 'system' | 'message' }> = [{
+        senderId: 'system', senderName: 'Workstream', type: 'system',
+        text: `Order placed: ${title}. Payment is held in escrow until the work is approved.`
+      }];
+      if (requirements) opening.push({ senderId: buyer.id, senderName: buyer.name, type: 'message', text: `Project requirements: ${requirements}` });
+      opening.forEach((m, i) => {
+        recordMessage({
+          id: 'msg_' + Date.now() + '_' + i + Math.random().toString(36).slice(2, 6),
+          orderId: id, ...m, timestamp: new Date(Date.now() + i).toISOString(),
+          metadata: { action: i === 0 ? 'order_created' : 'requirements_logged' }
+        } as Message);
+      });
+      saveMessagesToDisk();
+    }
     res.status(201).json(enriched);
   } catch (err: any) {
     res.status(err.status || 400).json({ error: err.message });
@@ -5362,7 +5383,8 @@ function postOfferMessage(order: Order, offer: WorkstreamOffer, sender: { id: st
     type: sender ? 'message' : 'system',
     metadata: { action, offerId: offer.id, offerKind: offer.kind }
   };
-  messages.push(msg);
+  // recordMessage (not a bare push) so the message is also in messageIndex, which GET /api/messages/:orderId reads.
+  recordMessage(msg);
   saveMessagesToDisk();
   broadcastMessage(msg, order.id);
 }
@@ -5497,7 +5519,8 @@ app.post('/api/offers/:id/:action(accept|decline|cancel)', requireAuth, rateLimi
         feeBreakdown: financeLedger.quoteOrder(offer.amount)
       };
       newOrder = enrichOrderWithServiceInfo(child);
-      orders.unshift(newOrder);
+      // recordOrder (not a bare unshift) so the new order is in orderIndex; otherwise its workstream 404s.
+      recordOrder(newOrder);
       offer.status = 'paid';
       offer.fundedOrderId = childId;
     } else {

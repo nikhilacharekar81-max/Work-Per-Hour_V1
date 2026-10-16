@@ -662,8 +662,10 @@ export default function App() {
     const currentUid = impersonatedUser ? impersonatedUser.id : currentUser?.id;
     
     // 1. Search for existing conversation between current user and this seller for this specific gig/project
+    // Finished or cancelled orders are not reused: the buyer gets a fresh inquiry instead of a closed thread.
     let existingOrder = orders.find(o => 
       (o.buyerId === currentUid && o.sellerId === sellerId) &&
+      !['completed', 'cancelled'].includes(o.status) &&
       (gigId ? o.gigId === gigId : (projectId ? o.projectId === projectId : true))
     );
     
@@ -1703,7 +1705,7 @@ export default function App() {
       setSelectedOrder(newOrd);
       fetchMessages(newOrd.id);
       refresh();
-      navigate('/orders');
+      navigate(`/messages/${newOrd.id}`);
     } catch (err) {
       console.error(err);
     }
