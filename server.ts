@@ -2817,6 +2817,9 @@ app.post('/api/orders/:id/message', requireAuth, rateLimit(120, 60_000), (req, r
   if (!canAccessOrderWorkstream(user, order)) {
     return res.status(403).json({ error: 'Forbidden: You are not a participant of this Workstream.' });
   }
+  if (order.isMuted && !isStaffUser(user)) {
+    return res.status(403).json({ error: 'Chat is currently paused.' });
+  }
   const fileCheck = validateMessageFileInfo(req.body.fileInfo, user);
   if (!fileCheck.ok) return res.status(400).json({ error: fileCheck.error });
 

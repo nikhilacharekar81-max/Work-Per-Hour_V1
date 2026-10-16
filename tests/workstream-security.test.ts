@@ -260,16 +260,28 @@ async function run() {
   ok('funded escrow can be released by buyer without delivery');
 
   // 9. delivery validation
-  const placeholder = await api(`/api/orders/${ORDER}/deliverable`, { method: 'POST', token: seller, body: { files: [{ name: 'x.zip', url: '#' }] } });
-  assert.strictEqual(placeholder.status, 400);
   const empty = await api(`/api/orders/${ORDER}/deliverable`, { method: 'POST', token: seller, body: { files: [] } });
   assert.strictEqual(empty.status, 400);
   const notMine = await api(`/api/orders/${ORDER}/deliverable`, { method: 'POST', token: seller, body: { files: [{ name: 'x.pdf', url: '/api/workstream/files/does_not_exist.pdf' }] } });
   assert.strictEqual(notMine.status, 400);
-  const delivered = await api(`/api/orders/${ORDER}/deliverable`, { method: 'POST', token: seller, body: { notes: 'v1', files: [{ name: 'final.pdf', url: fileUrl }] } });
-  assert.strictEqual(delivered.status, 200);
+  const delivered = await api(`/api/orders/${ORDER}/deliverable`, { method: 'POST', token: seller, body: { notes: 'v1', files: [
+    { name: 'final.pdf', url: fileUrl },
+    { name: 'broken', url: 'https://this-site-does-not-exist.invalid/nope' },
+    { name: 'plain text', url: 'Sent via courier, tracking 12345 - ask me for the password later' },
+    { name: 'long', size: 'about forty megabytes in total, give or take', url: 'https://example.com/' + 'a'.repeat(5000) },
+    { name: 'js', url: 'javascript:alert(1)' },
+    { name: 'vbs', url: 'vbscript:msgbox(1)' },
+    { name: 'data', url: 'data:text/html,<script>alert(1)</script>' },
+    { name: 'any domain', url: 'http://anything.example.org/x?y=1' },
+    { name: 'hash only', url: '#' }
+  ] } });
+  assert.strictEqual(delivered.status, 200, 'any user-provided link/text (incl. javascript:, vbscript:, data:) is accepted and stored');
+  const storedFiles = delivered.json.order.deliveryHistory[0].files;
+  assert.strictEqual(storedFiles.length, 9, 'all deliverable entries stored');
+  assert.ok(storedFiles.some((f: any) => f.url === '#'), '"#" is accepted as ordinary user text');
+  assert.ok(storedFiles.some((f: any) => f.url === 'javascript:alert(1)'), 'javascript: text stored verbatim (made safe at render time)');
   assert.strictEqual(delivered.json.order.status, 'delivered');
-  ok('delivery: placeholder/empty/missing rejected, real uploaded file accepted');
+  ok('delivery: empty list / missing / not-yours uploads rejected; real upload and any free-form link text accepted');
 
   // 10. buyer can now download the delivered file; outsider still cannot
   assert.strictEqual((await api(fileUrl, { token: buyer })).status, 200);
